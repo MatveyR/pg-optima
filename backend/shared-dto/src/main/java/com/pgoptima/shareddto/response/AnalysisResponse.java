@@ -1,6 +1,6 @@
-package com.pgoptima.dto.response;
+package com.pgoptima.shareddto.response;
 
-import com.pgoptima.dto.enums.ImpactLevel;
+import com.pgoptima.shareddto.enums.ImpactLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

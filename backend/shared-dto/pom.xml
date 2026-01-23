@@ -12,6 +12,7 @@
     </parent>
 
     <artifactId>shared-dto</artifactId>
+    <name>shared-dto</name>
     <packaging>jar</packaging>
 
     <dependencies>
@@ -37,6 +38,10 @@
             <artifactId>swagger-annotations</artifactId>
             <version>2.2.42</version>
             <optional>true</optional>
+        </dependency>
+        <dependency>
+            <groupId>jakarta.validation</groupId>
+            <artifactId>jakarta.validation-api</artifactId>
         </dependency>
     </dependencies>
 </project>
