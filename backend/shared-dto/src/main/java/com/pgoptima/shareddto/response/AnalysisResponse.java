@@ -1,13 +1,15 @@
 package com.pgoptima.shareddto.response;
 
-import com.pgoptima.shareddto.enums.ImpactLevel;
+import com.pgoptima.shareddto.response.Recommendation;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 @Data
 @Builder
@@ -15,15 +17,13 @@ import java.util.List;
 @AllArgsConstructor
 public class AnalysisResponse {
     private boolean success;
+    private String errorMessage;
     private String originalQuery;
     private String executionPlanJson;
+    private Duration originalExecutionTime;
+    private Duration analysisDuration;
+    private Instant requestTimestamp;
     private List<Recommendation> recommendations;
-    private Duration executionTime;
-    private String errorMessage;
-
-    // Методы-помощники
-    public boolean hasHighImpactRecommendations() {
-        return recommendations.stream()
-                .anyMatch(r -> ImpactLevel.HIGH.equals(r.getImpact()));
-    }
+    private Map<String, Object> optimizationStatistics;
+    private String optimizationReport;
 }
