@@ -35,7 +35,6 @@ public class AnalyticsController {
             @Parameter(description = "Параметры анализа и оптимизации", required = true)
             @Valid @RequestBody AnalysisRequest request) {
 
-        // Включаем авто-применение для этого эндпоинта
         request.setAutoApply(true);
 
         AnalysisResponse response = analyticsService.analyzeQuery(request);
@@ -50,7 +49,6 @@ public class AnalyticsController {
     public ResponseEntity<AnalysisResponse> analyzeOnly(
             @Valid @RequestBody AnalysisRequest request) {
 
-        // Отключаем авто-применение
         request.setAutoApply(false);
 
         AnalysisResponse response = analyticsService.analyzeQuery(request);
@@ -63,7 +61,6 @@ public class AnalyticsController {
             description = "Возвращает статистику по выполненным оптимизациям"
     )
     public ResponseEntity<Map<String, Object>> getOptimizationStats() {
-        // TODO: Реализовать сбор статистики
         Map<String, Object> stats = new HashMap<>();
         stats.put("total_analyses", 0);
         stats.put("successful_optimizations", 0);
@@ -85,7 +82,6 @@ public class AnalyticsController {
         Map<String, Object> result = new HashMap<>();
 
         try {
-            // TODO: Реализовать применение конкретной рекомендации
             result.put("success", true);
             result.put("recommendation_id", recommendationId);
             result.put("applied", true);
