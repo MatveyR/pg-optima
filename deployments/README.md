@@ -1,1 +1,1 @@
-# Docker, docker-compose, k8s манифесты
+# k8s манифесты

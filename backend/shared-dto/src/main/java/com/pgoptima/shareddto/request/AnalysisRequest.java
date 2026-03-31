@@ -1,27 +1,27 @@
 package com.pgoptima.shareddto.request;
 
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
-import javax.validation.Valid;
-import javax.validation.constraints.NotBlank;
-import javax.validation.constraints.NotNull;
 
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
 public class AnalysisRequest {
-    @NotBlank(message = "SQL query is required")
+
+    @NotNull(message = "Connection ID is required")
+    private Long connectionId;
+
+    @NotBlank(message = "SQL query cannot be empty")
     private String sqlQuery;
 
-    @Valid
-    @NotNull(message = "Database connection is required")
-    private ConnectionParams connection;
+    private boolean autoApply = false;
 
-    private boolean autoApply = false; // Флаг авто-применения рекомендаций
-    private int timeoutSeconds = 30; // Таймаут выполнения
-    private boolean includeStatistics = true; // Включать ли статистику
+    private Integer timeoutSeconds = 30;
+
+    private boolean includeStatistics = true;
 }

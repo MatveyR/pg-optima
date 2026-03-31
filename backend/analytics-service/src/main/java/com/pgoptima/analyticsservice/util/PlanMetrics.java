@@ -1,0 +1,60 @@
+package com.pgoptima.analyticsservice.util;
+
+import lombok.Data;
+import java.util.HashSet;
+import java.util.Set;
+
+@Data
+public class PlanMetrics {
+    long nodeCount = 0;
+    long seqScanCount = 0;
+    long indexScanCount = 0;
+    long indexOnlyScanCount = 0;
+    long bitmapScanCount = 0;
+    long joinCount = 0;
+    long nestedLoopCount = 0;
+    long hashJoinCount = 0;
+    long mergeJoinCount = 0;
+    long sortCount = 0;
+    long memorySortCount = 0;
+    long diskSortCount = 0;
+    long aggregateCount = 0;
+    long windowFunctionCount = 0;
+    long cteScanCount = 0;
+    long subqueryCount = 0;
+    long materializeCount = 0;
+    long hashCount = 0;
+    long limitCount = 0;
+    long uniqueCount = 0;
+    long setOpCount = 0;
+    long appendCount = 0;
+    long recursiveUnionCount = 0;
+    long filterCount = 0;
+    long joinFilterCount = 0;
+    long indexConditionCount = 0;
+    long nullFilterCount = 0;
+    long actualRows = 0;
+    long plannedRows = 0;
+    long maxSeqScanRows = 0;
+    long maxJoinRows = 0;
+    long diskSortRows = 0;
+    long sharedHitBlocks = 0;
+    long sharedReadBlocks = 0;
+    long sharedDirtiedBlocks = 0;
+    long sharedWrittenBlocks = 0;
+    long localHitBlocks = 0;
+    long localReadBlocks = 0;
+    long localDirtiedBlocks = 0;
+    long localWrittenBlocks = 0;
+    long tempReadBlocks = 0;
+    long tempWrittenBlocks = 0;
+    double totalCost = 0.0;
+    double startupCost = 0.0;
+    double actualTotalTime = 0.0;
+    long actualLoops = 0;
+    int parallelWorkerCount = 0;
+    int maxDepth = 0;
+    String largestSeqScanTable = "";
+    Set<String> usedIndexes = new HashSet<>();
+    Set<String> sortKeyColumns = new HashSet<>();
+}

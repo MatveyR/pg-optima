@@ -10,7 +10,11 @@ public class PostgrePlanParser {
 
     public static JsonNode parse(String planJson) throws Exception {
         JsonNode root = mapper.readTree(planJson);
-        // PostgreSQL возвращает массив с одним элементом
-        return root.isArray() ? root.get(0).get("Plan") : root.get("Plan");
+        if (root.isArray() && !root.isEmpty()) {
+            return root.get(0).get("Plan");
+        } else if (root.has("Plan")) {
+            return root.get("Plan");
+        }
+        throw new IllegalArgumentException("Invalid EXPLAIN output: no Plan node found");
     }
 }

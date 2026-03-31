@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: init-databases
+  namespace: pgoptima
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: init-db
+          image: postgres:15
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -h postgres -U postgres; do sleep 2; done
+              psql -h postgres -U postgres -c "CREATE DATABASE \"pgoptima-auth\";"
+              psql -h postgres -U postgres -c "CREATE DATABASE \"pgoptima-user\";"
+              psql -h postgres -U postgres -c "CREATE DATABASE \"pgoptima-analytics\";"
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
