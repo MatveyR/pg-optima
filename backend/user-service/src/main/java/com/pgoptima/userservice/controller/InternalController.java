@@ -18,7 +18,6 @@ public class InternalController {
     @GetMapping("/connections/{id}")
     @Operation(summary = "Get connection details with password (for analytics-service)")
     public ConnectionDTO getConnectionForInternal(@PathVariable Long id) {
-        // Здесь можно добавить проверку внутреннего токена, но для простоты пока открыто
         return connectionService.getConnectionForInternalUse(id);
     }
 }

@@ -4,9 +4,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-/**
- * Уровень влияния рекомендации на производительность
- */
+
 @Schema(description = "Уровень влияния рекомендации на производительность")
 public enum ImpactLevel {
 
@@ -52,9 +50,6 @@ public enum ImpactLevel {
         throw new IllegalArgumentException("Unknown ImpactLevel: " + value);
     }
 
-    /**
-     * Возвращает уровень влияния на основе предполагаемого улучшения в процентах
-     */
     public static ImpactLevel fromImprovementPercentage(double improvementPercent) {
         if (improvementPercent >= HIGH.minImprovementThreshold) {
             return HIGH;

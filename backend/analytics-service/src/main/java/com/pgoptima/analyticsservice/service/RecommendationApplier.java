@@ -99,7 +99,6 @@ public class RecommendationApplier {
                 stmt.execute(rec.getSqlCommand());
                 conn.commit();
             }
-            // ADD_LIMIT не требует физического применения, только измерение с модифицированным запросом
         } catch (SQLException e) {
             conn.rollback();
             throw e;
@@ -107,8 +106,7 @@ public class RecommendationApplier {
     }
 
     private Duration executeQueryWithTiming(Connection conn, String query, boolean isOptimized) throws SQLException {
-        String sql = isOptimized ? query : query; // для ADD_LIMIT нужно модифицировать, но упростим
-        // Для избежания изменений данных используем EXPLAIN ANALYZE только для SELECT
+        String sql = isOptimized ? query : query;
         String explainQuery = "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + sql;
         long start = System.nanoTime();
         try (Statement stmt = conn.createStatement()) {

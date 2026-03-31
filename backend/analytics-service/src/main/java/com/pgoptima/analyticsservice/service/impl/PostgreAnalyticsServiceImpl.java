@@ -49,23 +49,19 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                 .success(false)
                 .build();
 
-        // 1. Проверка типа запроса
         if (SqlQueryTypeDetector.isModifyingQuery(request.getSqlQuery()) && !properties.isAllowModifyingQueries()) {
             response.setErrorMessage("Modifying queries (INSERT/UPDATE/DELETE) are not allowed for analysis.");
             return response;
         }
 
-        // 2. Получение данных подключения из user-service
         ConnectionDetails connection;
         try {
-            // В реальности нужно получить токен из контекста, но для упрощения передадим заглушку
             connection = userServiceClient.getConnectionById(request.getConnectionId(), "Bearer dummy");
         } catch (Exception e) {
             response.setErrorMessage("Failed to fetch connection details: " + e.getMessage());
             return response;
         }
 
-        // 3. Выполнение EXPLAIN и получение плана
         PlanExecutionResult execResult;
         try {
             execResult = executeExplain(request.getSqlQuery(), connection, request.isAutoApply());
@@ -77,7 +73,6 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
         response.setExecutionPlanJson(execResult.planJson);
         response.setOriginalExecutionTime(execResult.executionTime);
 
-        // 4. Анализ плана
         List<Recommendation> recommendations;
         try {
             JsonNode plan = PostgrePlanParser.parse(execResult.planJson);
@@ -87,7 +82,6 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
             return response;
         }
 
-        // 5. Автоматическое применение (если запрошено)
         if (request.isAutoApply() && properties.isAllowModifyingQueries()) {
             recommendations = recommendationApplier.applyAndMeasure(recommendations,
                     request.getSqlQuery(), connection, execResult.executionTime);
@@ -99,7 +93,6 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
         generateReport(response);
         response.setAnalysisDuration(Duration.between(start, Instant.now()));
 
-        // 6. Сохранение в историю (асинхронно или синхронно)
         saveHistory(request, response, connection);
 
         return response;
@@ -151,7 +144,7 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
     @Transactional
     protected void saveHistory(AnalysisRequest request, AnalysisResponse response, ConnectionDetails conn) {
         OptimizationHistory history = new OptimizationHistory();
-        history.setUserId(1L); // временно, позже из контекста
+        history.setUserId(1L);
         history.setConnectionId(request.getConnectionId());
         history.setOriginalQuery(request.getSqlQuery());
         history.setOriginalExecutionTime(response.getOriginalExecutionTime());

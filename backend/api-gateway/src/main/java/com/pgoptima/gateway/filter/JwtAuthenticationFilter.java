@@ -24,7 +24,6 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
 
     private final JwtTokenValidator tokenValidator;
 
-    // Открытые маршруты, не требующие JWT
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/register",
             "/api/v1/auth/login",
@@ -40,12 +39,10 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         ServerHttpRequest request = exchange.getRequest();
         String path = request.getURI().getPath();
 
-        // Пропускаем публичные маршруты
         if (isPublicPath(path)) {
             return chain.filter(exchange);
         }
 
-        // Извлекаем JWT из заголовка Authorization
         String authHeader = request.getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             log.warn("Missing or invalid Authorization header for path: {}", path);
@@ -55,11 +52,9 @@ public class JwtAuthenticationFilter implements GlobalFilter, Ordered {
         String token = authHeader.substring(7);
 
         try {
-            // Валидируем токен
             Long userId = tokenValidator.getUserIdFromToken(token);
             String email = tokenValidator.getEmailFromToken(token);
 
-            // Добавляем userId и email в заголовки для downstream сервисов
             ServerHttpRequest mutatedRequest = request.mutate()
                     .header("X-User-Id", String.valueOf(userId))
                     .header("X-User-Email", email)

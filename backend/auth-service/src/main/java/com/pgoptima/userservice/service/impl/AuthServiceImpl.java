@@ -80,7 +80,6 @@ public class AuthServiceImpl implements AuthService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         String newAccessToken = tokenProvider.generateAccessToken(user);
-        // можно также обновить refresh token, но для простоты оставим старый
 
         return LoginResponse.builder()
                 .accessToken(newAccessToken)

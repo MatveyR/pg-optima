@@ -37,7 +37,7 @@ public class ConnectionEntity {
     private String username;
 
     @Column(nullable = false)
-    private String encryptedPassword; // хранится в зашифрованном виде
+    private String encryptedPassword;
 
     private String sslMode = "disable";
 

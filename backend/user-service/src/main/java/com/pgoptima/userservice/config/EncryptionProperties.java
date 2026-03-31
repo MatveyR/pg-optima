@@ -8,6 +8,6 @@ import org.springframework.stereotype.Component;
 @Component
 @ConfigurationProperties(prefix = "encryption")
 public class EncryptionProperties {
-    private String secretKey; // 32-байтовый ключ для AES (base64 или hex)
+    private String secretKey;
     private String salt = "PgOptimaSalt";
 }

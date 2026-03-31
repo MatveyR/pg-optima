@@ -5,9 +5,6 @@ import com.fasterxml.jackson.annotation.JsonValue;
 import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Getter;
 
-/**
- * Поддерживаемые типы баз данных
- */
 @Schema(description = "Поддерживаемые типы баз данных")
 public enum DatabaseType {
 
@@ -30,9 +27,7 @@ public enum DatabaseType {
         return displayName;
     }
 
-    /**
-     * Формирует JDBC URL на основе параметров
-     */
+
     public String buildJdbcUrl(String host, int port, String database) {
         return jdbcUrlTemplate
                 .replace("{host}", host)

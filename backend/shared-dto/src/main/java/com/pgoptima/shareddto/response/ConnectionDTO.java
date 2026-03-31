@@ -21,5 +21,4 @@ public class ConnectionDTO {
     private Instant createdAt;
     private Instant updatedAt;
     private String password;
-    // Пароль не передаётся в ответах (только при запросе от analytics-service через внутренний API)
 }

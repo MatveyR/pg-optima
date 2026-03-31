@@ -44,7 +44,7 @@ public class ConnectionServiceImpl implements ConnectionService {
         entity.setStatus(ConnectionStatus.ACTIVE);
 
         ConnectionEntity saved = connectionRepository.save(entity);
-        return toDto(saved, false); // не возвращаем пароль
+        return toDto(saved, false);
     }
 
     @Override
@@ -98,10 +98,9 @@ public class ConnectionServiceImpl implements ConnectionService {
 
     @Override
     public ConnectionDTO getConnectionForInternalUse(Long connectionId) {
-        // Внутренний метод – не проверяем ownerId, возвращаем с расшифрованным паролем
         ConnectionEntity entity = connectionRepository.findById(connectionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Connection not found"));
-        return toDto(entity, true); // includePassword = true
+        return toDto(entity, true);
     }
 
     private ConnectionDTO toDto(ConnectionEntity entity, boolean includePassword) {
@@ -119,7 +118,6 @@ public class ConnectionServiceImpl implements ConnectionService {
         dto.setCreatedAt(entity.getCreatedAt());
         dto.setUpdatedAt(entity.getUpdatedAt());
         if (includePassword) {
-            // Для внутреннего использования analytics-service
             dto.setPassword(encryptionService.decrypt(entity.getEncryptedPassword()));
         }
         return dto;

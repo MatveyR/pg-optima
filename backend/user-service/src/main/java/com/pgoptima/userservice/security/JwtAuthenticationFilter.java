@@ -32,8 +32,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             String token = authHeader.substring(7);
             try {
                 Long userId = tokenValidator.getUserIdFromToken(token);
-                // Не загружаем пользователя из БД, просто кладём userId в контекст
-                // Для авторизации достаточно аутентификации с принципалом = userId
                 UsernamePasswordAuthenticationToken auth =
                         new UsernamePasswordAuthenticationToken(userId, null, Collections.emptyList());
                 auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));

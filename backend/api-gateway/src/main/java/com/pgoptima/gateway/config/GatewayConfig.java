@@ -11,22 +11,18 @@ public class GatewayConfig {
     @Bean
     public RouteLocator customRouteLocator(RouteLocatorBuilder builder) {
         return builder.routes()
-                // Auth service
                 .route("auth-service", r -> r
                         .path("/api/v1/auth/**")
                         .uri("http://localhost:8083"))
-                // User service
                 .route("user-service", r -> r
                         .path("/api/v1/connections/**", "/api/v1/projects/**")
                         .uri("http://localhost:8082"))
-                // Analytics service
                 .route("analytics-service", r -> r
                         .path("/api/v1/optimization/**")
                         .uri("http://localhost:8081"))
-                // Swagger aggregation (optional)
                 .route("swagger-aggregator", r -> r
                         .path("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**")
-                        .uri("http://localhost:8083")) // можно перенаправлять на любой сервис
+                        .uri("http://localhost:8083"))
                 .build();
     }
 }

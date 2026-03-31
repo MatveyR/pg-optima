@@ -4,9 +4,7 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-/**
- * Типы рекомендаций по оптимизации SQL-запросов
- */
+
 @Schema(description = "Типы рекомендаций по оптимизации SQL-запросов")
 public enum RecommendationType {
 
@@ -73,16 +71,10 @@ public enum RecommendationType {
         throw new IllegalArgumentException("Unknown RecommendationType: " + value);
     }
 
-    /**
-     * Возвращает рекомендации, связанные с индексами
-     */
     public static RecommendationType[] getIndexRelatedTypes() {
         return new RecommendationType[]{CREATE_INDEX};
     }
 
-    /**
-     * Возвращает рекомендации, связанные с реструктуризацией запроса
-     */
     public static RecommendationType[] getQueryRestructureTypes() {
         return new RecommendationType[]{REWRITE_QUERY, CHANGE_JOIN_TYPE, SPLIT_QUERY};
     }

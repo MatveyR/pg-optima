@@ -27,7 +27,6 @@ public class PlanAnalyzer {
 
     private final PlanAnalyzerProperties properties;
 
-    // Вспомогательный класс контекста
     private static class AnalysisContext {
         String originalQuery;
         Map<String, String> tableAliases = new HashMap<>();
@@ -290,13 +289,12 @@ public class PlanAnalyzer {
     }
 
     private String findTableForSort(JsonNode node, AnalysisContext ctx) {
-        // ищем ближайший Scan узел
         JsonNode current = node;
         while (current != null) {
             if (getNodeText(current, "Node Type").contains("Scan")) {
                 return getNodeText(current, "Relation Name");
             }
-            JsonNode parent = current.get("Parent"); // нет прямой ссылки, упростим: возьмем первый scan из контекста
+            JsonNode parent = current.get("Parent");
             break;
         }
         if (!ctx.scanNodes.isEmpty()) {
@@ -306,7 +304,6 @@ public class PlanAnalyzer {
     }
 
     private void analyzeAggregations(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        // упрощённо
         JsonNode plans = node.get("Plans");
         if (plans != null && plans.isArray()) {
             for (JsonNode child : plans) analyzeAggregations(child, recommendations, ctx);
@@ -328,7 +325,6 @@ public class PlanAnalyzer {
     }
 
     private void analyzeParallelism(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        // упрощённо
         JsonNode plans = node.get("Plans");
         if (plans != null && plans.isArray()) {
             for (JsonNode child : plans) analyzeParallelism(child, recommendations, ctx);
@@ -349,7 +345,6 @@ public class PlanAnalyzer {
     }
 
     private void analyzeIndexUsage(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        // упрощённо
         JsonNode plans = node.get("Plans");
         if (plans != null && plans.isArray()) {
             for (JsonNode child : plans) analyzeIndexUsage(child, recommendations, ctx);

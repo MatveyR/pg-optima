@@ -15,7 +15,6 @@ public class RateLimiterConfig {
             if (userId != null) {
                 return Mono.just(userId);
             }
-            // Fallback: IP-адрес
             String ip = exchange.getRequest().getRemoteAddress().getAddress().getHostAddress();
             return Mono.just(ip);
         };

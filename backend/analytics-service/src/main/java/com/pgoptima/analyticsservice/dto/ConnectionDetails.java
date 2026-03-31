@@ -10,7 +10,7 @@ public class ConnectionDetails {
     private int port;
     private String database;
     private String username;
-    private String password;   // пароль будет расшифрован user-service
+    private String password;
     private String sslMode;
     private Long ownerId;
 }

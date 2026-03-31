@@ -13,6 +13,5 @@ public interface ConnectionService {
     ConnectionDTO getConnection(Long userId, Long connectionId);
     List<ConnectionDTO> getUserConnections(Long userId);
     boolean testConnection(CreateConnectionRequest request);
-    // Внутренний метод для analytics-service
     ConnectionDTO getConnectionForInternalUse(Long connectionId);
 }

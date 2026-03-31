@@ -21,11 +21,11 @@ public class Recommendation {
     private ImpactLevel impact;
     private Double estimatedImprovement;
     private String sqlSuggestion;
-    private String sqlCommand; // Конкретная SQL команда для применения
-    private Boolean applied; // Была ли применена
+    private String sqlCommand;
+    private Boolean applied;
     private Duration originalExecutionTime;
     private Duration optimizedExecutionTime;
-    private Double actualImprovement; // Фактическое улучшение в %
-    private Map<String, Object> metrics; // Дополнительные метрики
-    private List<String> warnings; // Предупреждения при применении
+    private Double actualImprovement;
+    private Map<String, Object> metrics;
+    private List<String> warnings;
 }
