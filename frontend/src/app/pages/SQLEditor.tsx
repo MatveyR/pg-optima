@@ -16,23 +16,17 @@ import { analyticsApi } from '../../api/analytics';
 import { connectionsApi } from '../../api/connections';
 import { ConnectionDTO, AnalysisResponse, ExecuteResponse } from '../../types/api.types';
 import {saveQueryToHistory} from "../../store/historyStorage";
+import { useLocation } from 'react-router';
 
 export function SQLEditor() {
+    const location = useLocation();
     const [sql, setSql] = useState(`-- Добро пожаловать в SQL-редактор PgOptima
--- Пишите ваши PostgreSQL-запросы здесь
-
+-- Начните писать ваши PostgreSQL-запросы здесь
+    
 SELECT 
-  users.id,
-  users.name,
-  users.email,
-  COUNT(orders.id) as order_count,
-  SUM(orders.total) as total_spent
-FROM users
-LEFT JOIN orders ON users.id = orders.user_id
-WHERE users.created_at > '2024-01-01'
-GROUP BY users.id, users.name, users.email
-ORDER BY total_spent DESC
-LIMIT 100;`);
+    hello
+FROM world
+`);
 
     const [activeTab, setActiveTab] = useState<'results' | 'analysis'>('results');
     const [executing, setExecuting] = useState(false);
@@ -45,7 +39,13 @@ LIMIT 100;`);
 
     useEffect(() => {
         loadConnections();
-    }, []);
+        if (location.state) {
+            const { initialQuery, initialConnectionId } = location.state as { initialQuery?: string; initialConnectionId?: number };
+            if (initialQuery) setSql(initialQuery);
+            if (initialConnectionId) setSelectedConnectionId(initialConnectionId);
+            window.history.replaceState({}, document.title);
+        }
+    }, [location.state]);
 
     const loadConnections = async () => {
         try {
