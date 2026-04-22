@@ -14,7 +14,6 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
@@ -26,25 +25,27 @@ public class AsyncAnalysisServiceImpl implements AsyncAnalysisService {
     private final Map<String, AnalysisTask> tasks = new ConcurrentHashMap<>();
 
     @Override
-    public String submitTask(AnalysisRequest request) {
+    public String submitTask(AnalysisRequest request, String authHeader) {
         String taskId = UUID.randomUUID().toString();
         AnalysisTask task = new AnalysisTask();
         task.setTaskId(taskId);
         task.setStatus(TaskStatus.PENDING);
         task.setCreatedAt(Instant.now());
         tasks.put(taskId, task);
-        processAsync(taskId, request);
+        processAsync(taskId, request, authHeader);
+        log.info("Async task submitted: {}", taskId);
         return taskId;
     }
 
     @Async("analysisExecutor")
-    public void processAsync(String taskId, AnalysisRequest request) {
+    public void processAsync(String taskId, AnalysisRequest request, String authHeader) {
         AnalysisTask task = tasks.get(taskId);
         task.setStatus(TaskStatus.RUNNING);
         try {
-            var response = analyticsService.analyzeQuery(request);
+            var response = analyticsService.analyzeQuery(request, authHeader);
             task.setResult(response);
             task.setStatus(TaskStatus.COMPLETED);
+            log.info("Async task completed: {}", taskId);
         } catch (Exception e) {
             task.setStatus(TaskStatus.FAILED);
             task.setErrorMessage(e.getMessage());

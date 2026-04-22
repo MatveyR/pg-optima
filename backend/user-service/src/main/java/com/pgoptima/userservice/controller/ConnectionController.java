@@ -33,7 +33,7 @@ public class ConnectionController {
     @PutMapping("/{id}")
     @Operation(summary = "Update connection")
     public ResponseEntity<ConnectionDTO> updateConnection(@AuthenticationPrincipal Long userId,
-                                                          @PathVariable Long id,
+                                                          @PathVariable("id") Long id,
                                                           @Valid @RequestBody UpdateConnectionRequest request) {
         return ResponseEntity.ok(connectionService.updateConnection(userId, id, request));
     }
@@ -41,7 +41,7 @@ public class ConnectionController {
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete connection")
     public ResponseEntity<Void> deleteConnection(@AuthenticationPrincipal Long userId,
-                                                 @PathVariable Long id) {
+                                                 @PathVariable("id") Long id) {
         connectionService.deleteConnection(userId, id);
         return ResponseEntity.noContent().build();
     }
@@ -49,7 +49,7 @@ public class ConnectionController {
     @GetMapping("/{id}")
     @Operation(summary = "Get connection by id")
     public ResponseEntity<ConnectionDTO> getConnection(@AuthenticationPrincipal Long userId,
-                                                       @PathVariable Long id) {
+                                                       @PathVariable("id") Long id) {
         return ResponseEntity.ok(connectionService.getConnection(userId, id));
     }
 

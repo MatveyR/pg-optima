@@ -33,7 +33,7 @@ public class ProjectController {
     @DeleteMapping("/{id}")
     @Operation(summary = "Delete project")
     public ResponseEntity<Void> deleteProject(@AuthenticationPrincipal Long userId,
-                                              @PathVariable Long id) {
+                                              @PathVariable("id") Long id) {
         projectService.deleteProject(userId, id);
         return ResponseEntity.noContent().build();
     }
@@ -47,7 +47,7 @@ public class ProjectController {
     @GetMapping("/{id}")
     @Operation(summary = "Get project by id")
     public ResponseEntity<ProjectDTO> getProject(@AuthenticationPrincipal Long userId,
-                                                 @PathVariable Long id) {
+                                                 @PathVariable("id") Long id) {
         return ResponseEntity.ok(projectService.getProject(userId, id));
     }
 
@@ -61,7 +61,7 @@ public class ProjectController {
     @DeleteMapping("/queries/{id}")
     @Operation(summary = "Delete saved query")
     public ResponseEntity<Void> deleteQuery(@AuthenticationPrincipal Long userId,
-                                            @PathVariable Long id) {
+                                            @PathVariable("id") Long id) {
         projectService.deleteQuery(userId, id);
         return ResponseEntity.noContent().build();
     }
@@ -69,7 +69,7 @@ public class ProjectController {
     @GetMapping("/{projectId}/queries")
     @Operation(summary = "Get all queries in project")
     public ResponseEntity<List<SavedQueryDTO>> getProjectQueries(@AuthenticationPrincipal Long userId,
-                                                                 @PathVariable Long projectId) {
+                                                                 @PathVariable("projectId") Long projectId) {
         return ResponseEntity.ok(projectService.getProjectQueries(userId, projectId));
     }
 }

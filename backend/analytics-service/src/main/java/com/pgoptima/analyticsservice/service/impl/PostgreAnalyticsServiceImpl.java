@@ -3,24 +3,22 @@ package com.pgoptima.analyticsservice.service.impl;
 import com.pgoptima.analyticsservice.client.UserServiceClient;
 import com.pgoptima.analyticsservice.config.PlanAnalyzerProperties;
 import com.pgoptima.analyticsservice.dto.ConnectionDetails;
-import com.pgoptima.analyticsservice.entity.OptimizationHistory;
-import com.pgoptima.analyticsservice.entity.RecommendationResult;
 import com.pgoptima.analyticsservice.repository.OptimizationHistoryRepository;
 import com.pgoptima.analyticsservice.repository.RecommendationResultRepository;
 import com.pgoptima.analyticsservice.service.AnalyticsService;
-import com.pgoptima.analyticsservice.service.RecommendationApplier;
 import com.pgoptima.analyticsservice.util.PlanAnalyzer;
 import com.pgoptima.analyticsservice.util.PostgrePlanParser;
 import com.pgoptima.analyticsservice.util.SqlQueryTypeDetector;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pgoptima.shareddto.request.AnalysisRequest;
+import com.pgoptima.shareddto.request.ExecuteRequest;
 import com.pgoptima.shareddto.response.AnalysisResponse;
+import com.pgoptima.shareddto.response.ExecuteResponse;
 import com.pgoptima.shareddto.response.Recommendation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.*;
 import java.time.Duration;
@@ -34,14 +32,12 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
 
     private final UserServiceClient userServiceClient;
     private final PlanAnalyzer planAnalyzer;
-    private final RecommendationApplier recommendationApplier;
-    private final OptimizationHistoryRepository historyRepository;
-    private final RecommendationResultRepository resultRepository;
     private final PlanAnalyzerProperties properties;
 
     @Override
     @Cacheable(value = "analysisResults", key = "#request.connectionId + '-' + #request.sqlQuery.hashCode()", unless = "#result.success == false")
-    public AnalysisResponse analyzeQuery(AnalysisRequest request) {
+    public AnalysisResponse analyzeQuery(AnalysisRequest request, String authHeader) {
+        log.info("Starting analysis for connectionId={}, query length={}", request.getConnectionId(), request.getSqlQuery().length());
         Instant start = Instant.now();
         AnalysisResponse response = AnalysisResponse.builder()
                 .originalQuery(request.getSqlQuery())
@@ -49,23 +45,29 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                 .success(false)
                 .build();
 
+        // Проверка на модифицирующие запросы
         if (SqlQueryTypeDetector.isModifyingQuery(request.getSqlQuery()) && !properties.isAllowModifyingQueries()) {
             response.setErrorMessage("Modifying queries (INSERT/UPDATE/DELETE) are not allowed for analysis.");
+            log.warn("Rejected modifying query: {}", request.getSqlQuery());
             return response;
         }
 
+        // Получение деталей подключения
         ConnectionDetails connection;
         try {
-            connection = userServiceClient.getConnectionById(request.getConnectionId(), "Bearer dummy");
+            connection = userServiceClient.getConnectionById(request.getConnectionId(), authHeader);
         } catch (Exception e) {
+            log.error("Failed to fetch connection details: {}", e.getMessage(), e);
             response.setErrorMessage("Failed to fetch connection details: " + e.getMessage());
             return response;
         }
 
+        // Выполнение EXPLAIN
         PlanExecutionResult execResult;
         try {
-            execResult = executeExplain(request.getSqlQuery(), connection, request.isAutoApply());
+            execResult = executeExplain(request.getSqlQuery(), connection);
         } catch (SQLException e) {
+            log.error("Database error during EXPLAIN: {}", e.getMessage(), e);
             response.setErrorMessage("Database error: " + e.getMessage());
             return response;
         }
@@ -73,32 +75,104 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
         response.setExecutionPlanJson(execResult.planJson);
         response.setOriginalExecutionTime(execResult.executionTime);
 
+        // Анализ плана
         List<Recommendation> recommendations;
         try {
             JsonNode plan = PostgrePlanParser.parse(execResult.planJson);
             recommendations = planAnalyzer.analyze(plan, request.getSqlQuery());
         } catch (Exception e) {
+            log.error("Plan analysis failed: {}", e.getMessage(), e);
             response.setErrorMessage("Plan analysis failed: " + e.getMessage());
             return response;
         }
 
-        if (request.isAutoApply() && properties.isAllowModifyingQueries()) {
-            recommendations = recommendationApplier.applyAndMeasure(recommendations,
-                    request.getSqlQuery(), connection, execResult.executionTime);
-            calculateStats(response, recommendations);
-        }
-
         response.setRecommendations(recommendations);
         response.setSuccess(true);
-        generateReport(response);
         response.setAnalysisDuration(Duration.between(start, Instant.now()));
-
-        saveHistory(request, response, connection);
+        log.info("Analysis completed in {} ms, found {} recommendations", response.getAnalysisDuration().toMillis(), recommendations.size());
 
         return response;
     }
 
-    private PlanExecutionResult executeExplain(String sql, ConnectionDetails conn, boolean autoApply) throws SQLException {
+    @Override
+    public ExecuteResponse executeQuery(ExecuteRequest request, String authHeader) {
+        log.info("Executing query for connectionId={}", request.getConnectionId());
+        Instant start = Instant.now();
+
+        ConnectionDetails connection;
+        try {
+            connection = userServiceClient.getConnectionById(request.getConnectionId(), authHeader);
+        } catch (Exception e) {
+            log.error("Failed to fetch connection details: {}", e.getMessage(), e);
+            return ExecuteResponse.builder()
+                    .success(false)
+                    .errorMessage("Failed to fetch connection details: " + e.getMessage())
+                    .build();
+        }
+
+        String url = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
+                connection.getHost(), connection.getPort(), connection.getDatabase(), connection.getSslMode());
+
+        try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
+            try (Statement stmt = conn.createStatement()) {
+                stmt.setFetchSize(1000);
+                boolean isSelect = stmt.execute(request.getQuery());
+                if (!isSelect) {
+                    // Для не-SELECT запросов возвращаем количество затронутых строк
+                    int updateCount = stmt.getUpdateCount();
+                    long duration = Duration.between(start, Instant.now()).toMillis();
+                    return ExecuteResponse.builder()
+                            .success(true)
+                            .rowCount(updateCount)
+                            .executionTimeMs(duration)
+                            .columns(List.of("affected_rows"))
+                            .rows(List.of(List.of(updateCount)))
+                            .build();
+                }
+
+                try (ResultSet rs = stmt.getResultSet()) {
+                    ResultSetMetaData meta = rs.getMetaData();
+                    int columnCount = meta.getColumnCount();
+                    List<String> columns = new ArrayList<>();
+                    for (int i = 1; i <= columnCount; i++) {
+                        columns.add(meta.getColumnLabel(i));
+                    }
+
+                    List<List<Object>> rows = new ArrayList<>();
+                    int rowCount = 0;
+                    while (rs.next()) {
+                        List<Object> row = new ArrayList<>();
+                        for (int i = 1; i <= columnCount; i++) {
+                            row.add(rs.getObject(i));
+                        }
+                        rows.add(row);
+                        rowCount++;
+                        // Ограничим количество строк, чтобы не перегружать память (например, 10000)
+                        if (rowCount > 10000) {
+                            log.warn("Result set truncated at 10000 rows");
+                            break;
+                        }
+                    }
+                    long duration = Duration.between(start, Instant.now()).toMillis();
+                    return ExecuteResponse.builder()
+                            .success(true)
+                            .columns(columns)
+                            .rows(rows)
+                            .rowCount(rowCount)
+                            .executionTimeMs(duration)
+                            .build();
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Query execution failed: {}", e.getMessage(), e);
+            return ExecuteResponse.builder()
+                    .success(false)
+                    .errorMessage("SQL error: " + e.getMessage())
+                    .build();
+        }
+    }
+
+    private PlanExecutionResult executeExplain(String sql, ConnectionDetails conn) throws SQLException {
         String url = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
                 conn.getHost(), conn.getPort(), conn.getDatabase(), conn.getSslMode());
         try (Connection connection = DriverManager.getConnection(url, conn.getUsername(), conn.getPassword())) {
@@ -110,60 +184,6 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                 Duration execTime = Duration.between(queryStart, Instant.now());
                 return new PlanExecutionResult(planJson, execTime);
             }
-        }
-    }
-
-    private void calculateStats(AnalysisResponse response, List<Recommendation> recommendations) {
-        long applied = recommendations.stream().filter(Recommendation::getApplied).count();
-        OptionalDouble avg = recommendations.stream()
-                .filter(r -> r.getActualImprovement() != null && r.getActualImprovement() > 0)
-                .mapToDouble(Recommendation::getActualImprovement)
-                .average();
-        Map<String, Object> stats = new HashMap<>();
-        stats.put("applied_recommendations", applied);
-        stats.put("total_recommendations", recommendations.size());
-        stats.put("average_improvement", avg.orElse(0.0));
-        response.setOptimizationStatistics(stats);
-    }
-
-    private void generateReport(AnalysisResponse response) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("=== Optimization Report ===\n");
-        sb.append("Original query: ").append(response.getOriginalQuery()).append("\n");
-        sb.append("Original time: ").append(response.getOriginalExecutionTime().toMillis()).append(" ms\n");
-        if (response.getOptimizationStatistics() != null) {
-            sb.append("Applied: ").append(response.getOptimizationStatistics().get("applied_recommendations"))
-                    .append(" / ").append(response.getOptimizationStatistics().get("total_recommendations")).append("\n");
-        }
-        for (Recommendation rec : response.getRecommendations()) {
-            sb.append("- ").append(rec.getDescription()).append("\n");
-        }
-        response.setOptimizationReport(sb.toString());
-    }
-
-    @Transactional
-    protected void saveHistory(AnalysisRequest request, AnalysisResponse response, ConnectionDetails conn) {
-        OptimizationHistory history = new OptimizationHistory();
-        history.setUserId(1L);
-        history.setConnectionId(request.getConnectionId());
-        history.setOriginalQuery(request.getSqlQuery());
-        history.setOriginalExecutionTime(response.getOriginalExecutionTime());
-        history.setSuccess(response.isSuccess());
-        if (response.getOptimizationStatistics() != null && response.getOptimizationStatistics().containsKey("average_improvement")) {
-            history.setImprovementPercent((Double) response.getOptimizationStatistics().get("average_improvement"));
-        }
-        history = historyRepository.save(history);
-
-        for (Recommendation rec : response.getRecommendations()) {
-            RecommendationResult res = new RecommendationResult();
-            res.setHistoryId(history.getId());
-            res.setType(rec.getType());
-            res.setDescription(rec.getDescription());
-            res.setSqlCommand(rec.getSqlCommand());
-            res.setApplied(rec.getApplied());
-            res.setEstimatedImprovement(rec.getEstimatedImprovement());
-            res.setActualImprovement(rec.getActualImprovement());
-            resultRepository.save(res);
         }
     }
 

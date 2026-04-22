@@ -11,5 +11,5 @@ public interface UserServiceClient {
 
     @GetMapping("/internal/connections/{id}")
     ConnectionDetails getConnectionById(@PathVariable("id") Long id,
-                                        @RequestHeader("Authorization") String authHeader);
+                                        @RequestHeader(value = "Authorization", required = false) String authHeader);
 }

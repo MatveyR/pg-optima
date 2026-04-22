@@ -104,3 +104,17 @@ export interface AsyncAnalysisResponse {
     result?: AnalysisResponse;
     error?: string;
 }
+
+export interface ExecuteRequest {
+    connectionId: number;
+    query: string;
+}
+
+export interface ExecuteResponse {
+    columns: string[];
+    rows: any[][];
+    rowCount: number;
+    executionTimeMs: number;
+    success: boolean;
+    errorMessage?: string;
+}

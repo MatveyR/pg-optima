@@ -17,7 +17,7 @@ public class InternalController {
 
     @GetMapping("/connections/{id}")
     @Operation(summary = "Get connection details with password (for analytics-service)")
-    public ConnectionDTO getConnectionForInternal(@PathVariable Long id) {
+    public ConnectionDTO getConnectionForInternal(@PathVariable("id") Long id) {
         return connectionService.getConnectionForInternalUse(id);
     }
 }

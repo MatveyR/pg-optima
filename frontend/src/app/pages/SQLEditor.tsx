@@ -15,14 +15,7 @@ import {
 import Split from 'react-split';
 import { analyticsApi } from '../../api/analytics';
 import { connectionsApi } from '../../api/connections';
-import { ConnectionDTO, AnalysisResponse } from '../../types/api.types';
-
-interface QueryResult {
-    columns: string[];
-    rows: any[][];
-    rowCount: number;
-    executionTime: number;
-}
+import { ConnectionDTO, AnalysisResponse, ExecuteResponse } from '../../types/api.types';
 
 export function SQLEditor() {
     const [sql, setSql] = useState(`-- Добро пожаловать в SQL-редактор PgOptima
@@ -47,13 +40,10 @@ LIMIT 100;`);
     const [connections, setConnections] = useState<ConnectionDTO[]>([]);
     const [showConnectionDropdown, setShowConnectionDropdown] = useState(false);
 
-    const [queryResult, setQueryResult] = useState<QueryResult>({
-        columns: [],
-        rows: [],
-        rowCount: 0,
-        executionTime: 0,
-    });
+    // Данные для вкладки "Результаты"
+    const [queryResult, setQueryResult] = useState<ExecuteResponse | null>(null);
 
+    // Данные для вкладки "Анализ"
     const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
 
     useEffect(() => {
@@ -72,6 +62,7 @@ LIMIT 100;`);
         }
     };
 
+    // Выполнение запроса (кнопка "Выполнить")
     const handleExecute = async () => {
         if (!selectedConnectionId) {
             alert('Выберите подключение');
@@ -80,27 +71,27 @@ LIMIT 100;`);
         setExecuting(true);
         setActiveTab('results');
         try {
-            // Запрос на анализ (без авто-применения)
-            const { data } = await analyticsApi.analyzeOnly({
+            const { data } = await analyticsApi.execute({
                 connectionId: selectedConnectionId,
                 query: sql,
             });
-            setAnalysisData(data);
-            // Результатов выполнения (строк) пока нет, показываем метрики
+            setQueryResult(data);
+        } catch (error: any) {
+            console.error('Execution failed', error);
             setQueryResult({
+                success: false,
+                errorMessage: error.response?.data?.message || 'Ошибка выполнения запроса',
                 columns: [],
                 rows: [],
                 rowCount: 0,
-                executionTime: data.executionTimeMs,
+                executionTimeMs: 0,
             });
-        } catch (error: any) {
-            console.error('Analysis failed', error);
-            alert(error.response?.data?.message || 'Ошибка анализа запроса');
         } finally {
             setExecuting(false);
         }
     };
 
+    // Анализ запроса (кнопка "Анализ")
     const handleAnalyze = async () => {
         if (!selectedConnectionId) {
             alert('Выберите подключение');
@@ -109,13 +100,16 @@ LIMIT 100;`);
         setExecuting(true);
         setActiveTab('analysis');
         try {
-            const { data } = await analyticsApi.analyzeOnly({
+            const { data } = await analyticsApi.analyze({
                 connectionId: selectedConnectionId,
-                query: sql,
+                sqlQuery: sql,
+                autoApply: false,
             });
             setAnalysisData(data);
-        } catch (error) {
+        } catch (error: any) {
             console.error('Analysis failed', error);
+            setAnalysisData(null);
+            alert(error.response?.data?.message || 'Ошибка анализа запроса');
         } finally {
             setExecuting(false);
         }
@@ -128,14 +122,10 @@ LIMIT 100;`);
 
     const getSeverityColor = (severity: string) => {
         switch (severity) {
-            case 'high':
-                return 'var(--pg-severity-high)';
-            case 'medium':
-                return 'var(--pg-severity-medium)';
-            case 'low':
-                return 'var(--pg-severity-low)';
-            default:
-                return 'var(--pg-text-secondary)';
+            case 'high': return 'var(--pg-severity-high)';
+            case 'medium': return 'var(--pg-severity-medium)';
+            case 'low': return 'var(--pg-severity-low)';
+            default: return 'var(--pg-text-secondary)';
         }
     };
 
@@ -357,29 +347,78 @@ LIMIT 100;`);
                         <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--pg-bg-surface)' }}>
                             {activeTab === 'results' ? (
                                 <div className="p-4">
-                                    <div className="flex items-center gap-4 mb-4 text-xs" style={{ color: 'var(--pg-text-muted)' }}>
-                                        <div className="flex items-center gap-1.5">
-                                            <Clock className="w-3.5 h-3.5" />
-                                            {queryResult.executionTime}мс
-                                        </div>
-                                        <div className="flex items-center gap-1.5">
-                                            <Activity className="w-3.5 h-3.5" />
-                                            {queryResult.rowCount} строк
-                                        </div>
-                                    </div>
-                                    {analysisData?.optimizedQuery && (
-                                        <div className="mb-4">
-                                            <div className="text-sm font-medium mb-2" style={{ color: 'var(--pg-text-primary)' }}>
-                                                Оптимизированный запрос:
-                                            </div>
-                                            <pre className="p-3 rounded text-xs font-mono whitespace-pre-wrap" style={{ backgroundColor: 'var(--pg-bg-editor)', color: 'var(--pg-text-secondary)' }}>
-                        {analysisData.optimizedQuery}
-                      </pre>
+                                    {queryResult && !queryResult.success && (
+                                        <div className="mb-4 p-3 rounded bg-red-500/20 text-red-400 text-sm">
+                                            {queryResult.errorMessage}
                                         </div>
                                     )}
-                                    {queryResult.rows.length === 0 && (
+                                    {queryResult?.success && (
+                                        <>
+                                            <div className="flex items-center gap-4 mb-4 text-xs" style={{ color: 'var(--pg-text-muted)' }}>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Clock className="w-3.5 h-3.5" />
+                                                    {queryResult.executionTimeMs}мс
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Activity className="w-3.5 h-3.5" />
+                                                    {queryResult.rowCount} строк
+                                                </div>
+                                            </div>
+                                            {queryResult.columns.length > 0 ? (
+                                                <div
+                                                    className="rounded-lg border overflow-hidden"
+                                                    style={{ borderColor: 'var(--pg-border)' }}
+                                                >
+                                                    <div className="overflow-x-auto">
+                                                        <table className="w-full text-sm">
+                                                            <thead>
+                                                            <tr style={{ backgroundColor: 'var(--pg-bg-card)' }}>
+                                                                {queryResult.columns.map((col, idx) => (
+                                                                    <th
+                                                                        key={idx}
+                                                                        className="px-4 py-3 text-left font-medium text-xs"
+                                                                        style={{ color: 'var(--pg-text-primary)' }}
+                                                                    >
+                                                                        {col}
+                                                                    </th>
+                                                                ))}
+                                                            </tr>
+                                                            </thead>
+                                                            <tbody>
+                                                            {queryResult.rows.map((row, i) => (
+                                                                <tr
+                                                                    key={i}
+                                                                    className="border-t"
+                                                                    style={{
+                                                                        borderColor: 'var(--pg-border)',
+                                                                        backgroundColor: i % 2 === 0 ? 'transparent' : 'var(--pg-bg-card)',
+                                                                    }}
+                                                                >
+                                                                    {row.map((cell, j) => (
+                                                                        <td
+                                                                            key={j}
+                                                                            className="px-4 py-2.5 font-mono text-xs"
+                                                                            style={{ color: 'var(--pg-text-secondary)' }}
+                                                                        >
+                                                                            {cell !== null ? String(cell) : 'NULL'}
+                                                                        </td>
+                                                                    ))}
+                                                                </tr>
+                                                            ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>
+                                                    Запрос выполнен успешно, но не вернул строк.
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                    {!queryResult && (
                                         <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>
-                                            Нет данных для отображения. Выполните запрос.
+                                            Нажмите «Выполнить», чтобы увидеть результат.
                                         </div>
                                     )}
                                 </div>
@@ -389,54 +428,74 @@ LIMIT 100;`);
                                         <>
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}>
-                                                    <div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Время выполнения</div>
-                                                    <div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>{analysisData.executionTimeMs}мс</div>
+                                                    <div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Время выполнения (ориг.)</div>
+                                                    <div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>
+                                                        {analysisData.originalExecutionTime?.toFixed?.(0) ?? analysisData.originalExecutionTime}мс
+                                                    </div>
                                                 </div>
                                                 <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}>
-                                                    <div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Ожидаемое улучшение</div>
-                                                    <div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>{analysisData.estimatedImprovementPercent}%</div>
+                                                    <div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Длительность анализа</div>
+                                                    <div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>
+                                                        {analysisData.analysisDuration?.toFixed?.(0) ?? '?'}мс
+                                                    </div>
                                                 </div>
                                             </div>
                                             <div>
-                                                <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--pg-text-white)' }}>Проблемы производительности</h3>
+                                                <h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--pg-text-white)' }}>
+                                                    Рекомендации ({analysisData.recommendations?.length || 0})
+                                                </h3>
                                                 <div className="space-y-3">
-                                                    {analysisData.issues.map((issue, idx) => (
+                                                    {analysisData.recommendations?.map((rec, idx) => (
                                                         <div key={idx} className="rounded-lg border p-4" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}>
                                                             <div className="flex items-start justify-between mb-3">
                                                                 <div className="flex items-center gap-2">
-                                                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: getSeverityColor(issue.severity) }} />
+                                                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: getSeverityColor(rec.impact) }} />
                                                                     <div>
-                                                                        <div className="font-medium text-sm" style={{ color: 'var(--pg-text-white)' }}>{issue.title}</div>
-                                                                        <div className="text-xs mt-0.5 uppercase font-medium" style={{ color: getSeverityColor(issue.severity) }}>
-                                                                            {issue.severity === 'high' && 'высокий'}
-                                                                            {issue.severity === 'medium' && 'средний'}
-                                                                            {issue.severity === 'low' && 'низкий'}
+                                                                        <div className="font-medium text-sm" style={{ color: 'var(--pg-text-white)' }}>{rec.description}</div>
+                                                                        <div className="text-xs mt-0.5 uppercase font-medium" style={{ color: getSeverityColor(rec.impact) }}>
+                                                                            {rec.impact === 'HIGH' && 'высокий'}
+                                                                            {rec.impact === 'MEDIUM' && 'средний'}
+                                                                            {rec.impact === 'LOW' && 'низкий'}
                                                                         </div>
                                                                     </div>
                                                                 </div>
+                                                                {rec.estimatedImprovement && (
+                                                                    <div className="px-2 py-1 rounded text-xs font-medium" style={{ backgroundColor: 'rgba(80, 250, 123, 0.1)', color: 'var(--pg-success)' }}>
+                                                                        +{rec.estimatedImprovement}% быстрее
+                                                                    </div>
+                                                                )}
                                                             </div>
-                                                            <p className="text-xs mb-3" style={{ color: 'var(--pg-text-secondary)' }}>{issue.description}</p>
-                                                            <div>
-                                                                <div className="flex items-center gap-2 mb-2">
-                                                                    <Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--pg-accent)' }} />
-                                                                    <span className="text-xs font-medium" style={{ color: 'var(--pg-text-primary)' }}>Рекомендуемое исправление</span>
+                                                            <p className="text-xs mb-3" style={{ color: 'var(--pg-text-secondary)' }}>{rec.description}</p>
+                                                            {rec.sqlCommand && (
+                                                                <div>
+                                                                    <div className="flex items-center gap-2 mb-2">
+                                                                        <Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--pg-accent)' }} />
+                                                                        <span className="text-xs font-medium" style={{ color: 'var(--pg-text-primary)' }}>Рекомендуемое исправление</span>
+                                                                    </div>
+                                                                    <div className="relative rounded-lg p-3 font-mono text-xs" style={{ backgroundColor: 'var(--pg-bg-editor)', color: 'var(--pg-syntax-keyword)' }}>
+                                                                        <button onClick={() => copySuggestion(rec.sqlCommand)} className="absolute top-2 right-2 p-1.5 rounded transition-colors" style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-muted)' }}
+                                                                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-text-primary)'; }}
+                                                                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-muted)'; }}>
+                                                                            <Copy className="w-3.5 h-3.5" />
+                                                                        </button>
+                                                                        <pre className="overflow-x-auto">{rec.sqlCommand}</pre>
+                                                                    </div>
                                                                 </div>
-                                                                <div className="relative rounded-lg p-3 font-mono text-xs" style={{ backgroundColor: 'var(--pg-bg-editor)', color: 'var(--pg-syntax-keyword)' }}>
-                                                                    <button onClick={() => copySuggestion(issue.suggestion)} className="absolute top-2 right-2 p-1.5 rounded transition-colors" style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-muted)' }}
-                                                                            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-text-primary)'; }}
-                                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-muted)'; }}>
-                                                                        <Copy className="w-3.5 h-3.5" />
-                                                                    </button>
-                                                                    <pre className="overflow-x-auto">{issue.suggestion}</pre>
-                                                                </div>
-                                                            </div>
+                                                            )}
                                                         </div>
                                                     ))}
+                                                    {(!analysisData.recommendations || analysisData.recommendations.length === 0) && (
+                                                        <div className="text-center py-6" style={{ color: 'var(--pg-text-muted)' }}>
+                                                            Проблем не найдено. Запрос оптимален.
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
                                         </>
                                     ) : (
-                                        <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>Нажмите «Анализ», чтобы получить рекомендации</div>
+                                        <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>
+                                            Нажмите «Анализ», чтобы получить рекомендации.
+                                        </div>
                                     )}
                                 </div>
                             )}
