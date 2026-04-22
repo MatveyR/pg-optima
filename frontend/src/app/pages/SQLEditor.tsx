@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 import {
     Play,
-    Save,
     BarChart3,
     Database,
     ChevronDown,
@@ -16,6 +15,7 @@ import Split from 'react-split';
 import { analyticsApi } from '../../api/analytics';
 import { connectionsApi } from '../../api/connections';
 import { ConnectionDTO, AnalysisResponse, ExecuteResponse } from '../../types/api.types';
+import {saveQueryToHistory} from "../../store/historyStorage";
 
 export function SQLEditor() {
     const [sql, setSql] = useState(`-- Добро пожаловать в SQL-редактор PgOptima
@@ -40,10 +40,7 @@ LIMIT 100;`);
     const [connections, setConnections] = useState<ConnectionDTO[]>([]);
     const [showConnectionDropdown, setShowConnectionDropdown] = useState(false);
 
-    // Данные для вкладки "Результаты"
     const [queryResult, setQueryResult] = useState<ExecuteResponse | null>(null);
-
-    // Данные для вкладки "Анализ"
     const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
 
     useEffect(() => {
@@ -62,7 +59,6 @@ LIMIT 100;`);
         }
     };
 
-    // Выполнение запроса (кнопка "Выполнить")
     const handleExecute = async () => {
         if (!selectedConnectionId) {
             alert('Выберите подключение');
@@ -76,6 +72,17 @@ LIMIT 100;`);
                 query: sql,
             });
             setQueryResult(data);
+
+            if (data.success) {
+                const connection = connections.find(c => c.id === selectedConnectionId);
+                saveQueryToHistory({
+                    query: sql,
+                    connectionId: selectedConnectionId,
+                    connectionName: connection?.name || 'Неизвестно',
+                    executionTimeMs: data.executionTimeMs,
+                    rowCount: data.rowCount,
+                });
+            }
         } catch (error: any) {
             console.error('Execution failed', error);
             setQueryResult({
@@ -91,7 +98,6 @@ LIMIT 100;`);
         }
     };
 
-    // Анализ запроса (кнопка "Анализ")
     const handleAnalyze = async () => {
         if (!selectedConnectionId) {
             alert('Выберите подключение');
@@ -116,16 +122,24 @@ LIMIT 100;`);
     };
 
     const handleSave = () => {
-        // TODO: реализовать сохранение запроса в проект
         console.log('Save query', sql);
     };
 
-    const getSeverityColor = (severity: string) => {
-        switch (severity) {
-            case 'high': return 'var(--pg-severity-high)';
-            case 'medium': return 'var(--pg-severity-medium)';
-            case 'low': return 'var(--pg-severity-low)';
+    const getImpactColor = (impact: string) => {
+        switch (impact) {
+            case 'Высокий': return 'var(--pg-severity-high)';
+            case 'Средний': return 'var(--pg-severity-medium)';
+            case 'Низкий': return 'var(--pg-severity-low)';
             default: return 'var(--pg-text-secondary)';
+        }
+    };
+
+    const getImpactLabel = (impact: string) => {
+        switch (impact) {
+            case 'Высокий': return 'HIGH';
+            case 'Средний': return 'MEDIUM';
+            case 'Низкий': return 'LOW';
+            default: return 'INFO';
         }
     };
 
@@ -242,25 +256,6 @@ LIMIT 100;`);
                         <BarChart3 className="w-4 h-4" />
                         {executing && activeTab === 'analysis' ? 'Анализ...' : 'Анализ'}
                     </button>
-
-                    <button
-                        onClick={handleSave}
-                        className="p-2 rounded-lg transition-colors"
-                        style={{
-                            backgroundColor: 'transparent',
-                            color: 'var(--pg-text-secondary)',
-                        }}
-                        onMouseEnter={(e) => {
-                            e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)';
-                            e.currentTarget.style.color = 'var(--pg-text-primary)';
-                        }}
-                        onMouseLeave={(e) => {
-                            e.currentTarget.style.backgroundColor = 'transparent';
-                            e.currentTarget.style.color = 'var(--pg-text-secondary)';
-                        }}
-                    >
-                        <Save className="w-4 h-4" />
-                    </button>
                 </div>
             </div>
 
@@ -357,7 +352,7 @@ LIMIT 100;`);
                                             <div className="flex items-center gap-4 mb-4 text-xs" style={{ color: 'var(--pg-text-muted)' }}>
                                                 <div className="flex items-center gap-1.5">
                                                     <Clock className="w-3.5 h-3.5" />
-                                                    {queryResult.executionTimeMs}мс
+                                                    {queryResult.executionTimeMs} мс
                                                 </div>
                                                 <div className="flex items-center gap-1.5">
                                                     <Activity className="w-3.5 h-3.5" />
@@ -365,20 +360,13 @@ LIMIT 100;`);
                                                 </div>
                                             </div>
                                             {queryResult.columns.length > 0 ? (
-                                                <div
-                                                    className="rounded-lg border overflow-hidden"
-                                                    style={{ borderColor: 'var(--pg-border)' }}
-                                                >
+                                                <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--pg-border)' }}>
                                                     <div className="overflow-x-auto">
                                                         <table className="w-full text-sm">
                                                             <thead>
                                                             <tr style={{ backgroundColor: 'var(--pg-bg-card)' }}>
                                                                 {queryResult.columns.map((col, idx) => (
-                                                                    <th
-                                                                        key={idx}
-                                                                        className="px-4 py-3 text-left font-medium text-xs"
-                                                                        style={{ color: 'var(--pg-text-primary)' }}
-                                                                    >
+                                                                    <th key={idx} className="px-4 py-3 text-left font-medium text-xs" style={{ color: 'var(--pg-text-primary)' }}>
                                                                         {col}
                                                                     </th>
                                                                 ))}
@@ -386,20 +374,9 @@ LIMIT 100;`);
                                                             </thead>
                                                             <tbody>
                                                             {queryResult.rows.map((row, i) => (
-                                                                <tr
-                                                                    key={i}
-                                                                    className="border-t"
-                                                                    style={{
-                                                                        borderColor: 'var(--pg-border)',
-                                                                        backgroundColor: i % 2 === 0 ? 'transparent' : 'var(--pg-bg-card)',
-                                                                    }}
-                                                                >
+                                                                <tr key={i} className="border-t" style={{ borderColor: 'var(--pg-border)', backgroundColor: i % 2 === 0 ? 'transparent' : 'var(--pg-bg-card)' }}>
                                                                     {row.map((cell, j) => (
-                                                                        <td
-                                                                            key={j}
-                                                                            className="px-4 py-2.5 font-mono text-xs"
-                                                                            style={{ color: 'var(--pg-text-secondary)' }}
-                                                                        >
+                                                                        <td key={j} className="px-4 py-2.5 font-mono text-xs" style={{ color: 'var(--pg-text-secondary)' }}>
                                                                             {cell !== null ? String(cell) : 'NULL'}
                                                                         </td>
                                                                     ))}
@@ -424,19 +401,19 @@ LIMIT 100;`);
                                 </div>
                             ) : (
                                 <div className="p-4 space-y-4">
-                                    {analysisData ? (
+                                    {analysisData && analysisData.success ? (
                                         <>
                                             <div className="grid grid-cols-2 gap-3">
                                                 <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}>
                                                     <div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Время выполнения (ориг.)</div>
                                                     <div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>
-                                                        {analysisData.originalExecutionTime?.toFixed?.(0) ?? analysisData.originalExecutionTime}мс
+                                                        {analysisData.originalExecutionTimeMs} мс
                                                     </div>
                                                 </div>
                                                 <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}>
                                                     <div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Длительность анализа</div>
                                                     <div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>
-                                                        {analysisData.analysisDuration?.toFixed?.(0) ?? '?'}мс
+                                                        {analysisData.analysisDurationMs} мс
                                                     </div>
                                                 </div>
                                             </div>
@@ -449,13 +426,11 @@ LIMIT 100;`);
                                                         <div key={idx} className="rounded-lg border p-4" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}>
                                                             <div className="flex items-start justify-between mb-3">
                                                                 <div className="flex items-center gap-2">
-                                                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: getSeverityColor(rec.impact) }} />
+                                                                    <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: getImpactColor(rec.impact) }} />
                                                                     <div>
-                                                                        <div className="font-medium text-sm" style={{ color: 'var(--pg-text-white)' }}>{rec.description}</div>
-                                                                        <div className="text-xs mt-0.5 uppercase font-medium" style={{ color: getSeverityColor(rec.impact) }}>
-                                                                            {rec.impact === 'HIGH' && 'высокий'}
-                                                                            {rec.impact === 'MEDIUM' && 'средний'}
-                                                                            {rec.impact === 'LOW' && 'низкий'}
+                                                                        <div className="font-medium text-sm mr-10" style={{ color: 'var(--pg-text-white)' }}>{rec.description}</div>
+                                                                        <div className="text-xs mt-0.5 uppercase font-medium" style={{ color: getImpactColor(rec.impact) }}>
+                                                                            {getImpactLabel(rec.impact)}
                                                                         </div>
                                                                     </div>
                                                                 </div>
@@ -465,7 +440,6 @@ LIMIT 100;`);
                                                                     </div>
                                                                 )}
                                                             </div>
-                                                            <p className="text-xs mb-3" style={{ color: 'var(--pg-text-secondary)' }}>{rec.description}</p>
                                                             {rec.sqlCommand && (
                                                                 <div>
                                                                     <div className="flex items-center gap-2 mb-2">
@@ -473,9 +447,13 @@ LIMIT 100;`);
                                                                         <span className="text-xs font-medium" style={{ color: 'var(--pg-text-primary)' }}>Рекомендуемое исправление</span>
                                                                     </div>
                                                                     <div className="relative rounded-lg p-3 font-mono text-xs" style={{ backgroundColor: 'var(--pg-bg-editor)', color: 'var(--pg-syntax-keyword)' }}>
-                                                                        <button onClick={() => copySuggestion(rec.sqlCommand)} className="absolute top-2 right-2 p-1.5 rounded transition-colors" style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-muted)' }}
-                                                                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-text-primary)'; }}
-                                                                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-muted)'; }}>
+                                                                        <button
+                                                                            onClick={() => copySuggestion(rec.sqlCommand!)}
+                                                                            className="absolute top-2 right-2 p-1.5 rounded transition-colors"
+                                                                            style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-muted)' }}
+                                                                            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-text-primary)'; }}
+                                                                            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-muted)'; }}
+                                                                        >
                                                                             <Copy className="w-3.5 h-3.5" />
                                                                         </button>
                                                                         <pre className="overflow-x-auto">{rec.sqlCommand}</pre>
@@ -494,7 +472,7 @@ LIMIT 100;`);
                                         </>
                                     ) : (
                                         <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>
-                                            Нажмите «Анализ», чтобы получить рекомендации.
+                                            {analysisData?.errorMessage || 'Нажмите «Анализ», чтобы получить рекомендации.'}
                                         </div>
                                     )}
                                 </div>

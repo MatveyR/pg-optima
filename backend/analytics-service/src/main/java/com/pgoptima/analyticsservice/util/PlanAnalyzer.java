@@ -12,10 +12,8 @@ import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.statement.select.PlainSelect;
 import net.sf.jsqlparser.statement.select.Select;
-import net.sf.jsqlparser.util.TablesNamesFinder;
 import org.springframework.stereotype.Component;
 
-import java.sql.*;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -29,11 +27,12 @@ public class PlanAnalyzer {
 
     private static class AnalysisContext {
         String originalQuery;
-        Map<String, String> tableAliases = new HashMap<>();
         Set<String> whereColumns = new HashSet<>();
         Set<String> joinColumns = new HashSet<>();
         Set<String> orderByColumns = new HashSet<>();
         Set<String> groupByColumns = new HashSet<>();
+        boolean hasLimit = false;
+        boolean hasDistinct = false;
         PlanMetrics metrics = new PlanMetrics();
         List<JsonNode> scanNodes = new ArrayList<>();
         List<JsonNode> joinNodes = new ArrayList<>();
@@ -52,16 +51,227 @@ public class PlanAnalyzer {
         collectMetrics(plan, context.metrics);
         collectContextInfo(plan, context);
         analyzeOriginalQuery(context);
-        analyzeScans(plan, recommendations, context);
-        analyzeJoins(plan, recommendations, context);
-        analyzeSortOperations(plan, recommendations, context);
-        analyzeAggregations(plan, recommendations, context);
-        analyzeMemoryUsage(plan, recommendations, context);
-        analyzeParallelism(plan, recommendations, context);
-        analyzeSubqueries(plan, recommendations, context);
-        analyzeIndexUsage(plan, recommendations, context);
+
+        analyzeSeqScans(recommendations, context);
+        analyzeMissingJoinIndexes(recommendations, context);
+        analyzeSorts(recommendations, context);
+        analyzeCartesianJoins(recommendations, context);
+        analyzeMissingLimit(recommendations, context);
+        analyzeOrConditions(recommendations, context);
+        analyzeDiskTemporaryFiles(recommendations, context);
+        analyzeJoinTypes(recommendations, context);
+        analyzeSubqueries(recommendations, context);
+        analyzeAntiJoins(recommendations, context);
+        analyzeLikePattern(recommendations, context);
+        analyzeDistinctWithoutIndex(recommendations, context);
+        analyzeJsonbAccess(recommendations, context);
+        analyzeOutdatedStats(recommendations, context);
         generateOptimizedQueries(recommendations, context);
+
         return sortAndDeduplicate(recommendations);
+    }
+
+
+
+    private void analyzeSeqScans(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.metrics.seqScanCount == 0) return;
+        for (JsonNode node : ctx.scanNodes) {
+            String nodeType = getNodeText(node, "Node Type");
+            if ("Seq Scan".equals(nodeType)) {
+                long rows = getNodeLong(node, "Actual Rows");
+                long totalRows = getNodeLong(node, "Plan Rows");
+                String filter = getNodeText(node, "Filter");
+                String table = getNodeText(node, "Relation Name");
+                if (rows > properties.getSeqScanThreshold() && !filter.isEmpty()) {
+                    List<String> cols = new ArrayList<>(ctx.whereColumns);
+                    if (cols.isEmpty()) {
+                        cols = extractColumnsFromFilter(filter);
+                    }
+                    if (!cols.isEmpty()) {
+
+                        double estimatedImprovement = calculateIndexImprovement(rows, totalRows, filter);
+                        String indexCmd = String.format("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_%s_%s ON %s(%s);",
+                                table, cols.get(0).toLowerCase(), table, String.join(", ", cols));
+                        addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                                String.format("Полное сканирование таблицы «%s» (обработано %d строк). Создайте индекс для ускорения фильтрации.", table, rows),
+                                ImpactLevel.HIGH, estimatedImprovement, indexCmd);
+                    }
+                }
+            }
+        }
+    }
+
+    private void analyzeMissingJoinIndexes(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.metrics.joinCount == 0) return;
+        for (JsonNode joinNode : ctx.joinNodes) {
+            long rows = getNodeLong(joinNode, "Actual Rows");
+            if (rows > 10000 && !joinNode.has("Hash Cond") && !joinNode.has("Merge Cond")) {
+                addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                        "Обнаружено соединение без условий (декартово произведение) или без индексов. Добавьте условия соединения и/или индексы.",
+                        ImpactLevel.HIGH, 80.0, null);
+            }
+        }
+        if (ctx.joinColumns != null && !ctx.joinColumns.isEmpty()) {
+            String columns = String.join(", ", ctx.joinColumns);
+
+            addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                    "Для ускорения JOIN-операций создайте индексы на столбцах, участвующих в соединениях: " + columns,
+                    ImpactLevel.MEDIUM, 30.0,
+                    String.format("CREATE INDEX idx_join_%s ON таблица(%s);", columns.toLowerCase().replace(", ", "_"), columns));
+        }
+    }
+
+    private void analyzeSorts(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.metrics.sortCount == 0) return;
+        boolean diskSort = ctx.metrics.diskSortCount > 0;
+        if (diskSort || ctx.metrics.sortCount > 0) {
+            double improvement = diskSort ? 70.0 : 35.0;
+            String suggestion = diskSort ?
+                    "Сортировка выполняется на диске из-за нехватки памяти work_mem. Увеличьте work_mem или создайте индекс для сортировки." :
+                    "Сортировка больших объёмов данных без индекса. Рассмотрите создание индекса для ORDER BY.";
+            String sqlCmd = diskSort ? "SET work_mem = '64MB';" : null;
+            if (!ctx.orderByColumns.isEmpty()) {
+                String table = findTableForSort(ctx);
+                if (table != null) {
+                    sqlCmd = String.format("CREATE INDEX idx_%s_sort ON %s(%s);", table, table, String.join(", ", ctx.orderByColumns));
+                }
+            }
+            addRecommendation(recommendations, RecommendationType.INCREASE_WORK_MEM, suggestion,
+                    diskSort ? ImpactLevel.HIGH : ImpactLevel.MEDIUM, improvement, sqlCmd);
+        }
+    }
+
+    private void analyzeCartesianJoins(List<Recommendation> recommendations, AnalysisContext ctx) {
+        for (JsonNode joinNode : ctx.joinNodes) {
+            if (!joinNode.has("Join Filter") && !joinNode.has("Hash Cond") && !joinNode.has("Merge Cond")) {
+                addRecommendation(recommendations, RecommendationType.REWRITE_QUERY,
+                        "Обнаружено декартово произведение (CROSS JOIN). Добавьте условие соединения для фильтрации строк.",
+                        ImpactLevel.HIGH, 80.0, null);
+            }
+        }
+    }
+
+    private void analyzeMissingLimit(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (!ctx.hasLimit && ctx.metrics.actualRows > 1000 && ctx.originalQuery != null) {
+            double improvement = calculateLimitImprovement(ctx.metrics.actualRows);
+            String modifiedQuery = ctx.originalQuery + " LIMIT 100";
+            addRecommendation(recommendations, RecommendationType.ADD_LIMIT,
+                    "Запрос возвращает большое количество строк (" + ctx.metrics.actualRows + "). Добавьте LIMIT для ограничения выборки.",
+                    ImpactLevel.MEDIUM, improvement, modifiedQuery);
+        }
+    }
+
+    private void analyzeOrConditions(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.originalQuery != null && ctx.originalQuery.toUpperCase().contains(" OR ") && !ctx.originalQuery.toUpperCase().contains(" IN ")) {
+            addRecommendation(recommendations, RecommendationType.REWRITE_QUERY,
+                    "Использование OR может быть неэффективным. Замените на IN или UNION.",
+                    ImpactLevel.LOW, 15.0, null);
+        }
+    }
+
+    private void analyzeDiskTemporaryFiles(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.metrics.tempWrittenBlocks > properties.getHighBufferThreshold()) {
+            addRecommendation(recommendations, RecommendationType.INCREASE_WORK_MEM,
+                    "Запрос использует временные файлы на диске (" + ctx.metrics.tempWrittenBlocks + " блоков). Увеличьте параметр work_mem.",
+                    ImpactLevel.HIGH, 40.0, "SET work_mem = '128MB';");
+        }
+    }
+
+    private void analyzeJoinTypes(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.metrics.nestedLoopCount > 0 && ctx.metrics.nestedLoopCount > ctx.metrics.hashJoinCount) {
+            addRecommendation(recommendations, RecommendationType.CHANGE_JOIN_TYPE,
+                    "Преобладают вложенные циклы (Nested Loop). Для больших наборов данных эффективнее Hash Join. Проверьте статистику и наличие индексов.",
+                    ImpactLevel.MEDIUM, 25.0, null);
+        }
+    }
+
+    private void analyzeSubqueries(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.metrics.subqueryCount > 0 && ctx.metrics.actualRows > 10000) {
+            addRecommendation(recommendations, RecommendationType.REWRITE_QUERY,
+                    "Обнаружен подзапрос, обрабатывающий много строк. Рассмотрите возможность переписывания через JOIN.",
+                    ImpactLevel.MEDIUM, 30.0, null);
+        }
+    }
+
+    private void analyzeAntiJoins(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.originalQuery != null && (ctx.originalQuery.toUpperCase().contains(" NOT IN ") || ctx.originalQuery.toUpperCase().contains(" NOT EXISTS "))) {
+            addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                    "Операция NOT IN или NOT EXISTS может быть медленной без индекса. Убедитесь, что на подзапросе есть индекс.",
+                    ImpactLevel.MEDIUM, 35.0, null);
+        }
+    }
+
+    private void analyzeLikePattern(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.originalQuery != null && ctx.originalQuery.toLowerCase().contains(" like '%")) {
+            addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                    "Поиск по шаблону с ведущим '%' не использует обычный B-tree индекс. Установите расширение pg_trgm и создайте GIN-индекс.",
+                    ImpactLevel.MEDIUM, 50.0,
+                    "CREATE EXTENSION IF NOT EXISTS pg_trgm;\nCREATE INDEX CONCURRENTLY idx_table_column_trgm ON table USING GIN(column gin_trgm_ops);");
+        }
+    }
+
+    private void analyzeDistinctWithoutIndex(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.hasDistinct && ctx.metrics.actualRows > 10000) {
+            addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                    "Операция DISTINCT выполняется на большом количестве строк. Создайте индекс на столбцах, по которым делается DISTINCT.",
+                    ImpactLevel.LOW, 20.0, null);
+        }
+    }
+
+    private void analyzeJsonbAccess(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.originalQuery != null && (ctx.originalQuery.contains("->") || ctx.originalQuery.contains("->>"))) {
+            addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                    "Доступ к JSONB-полям без GIN-индекса приводит к полному сканированию. Создайте GIN-индекс.",
+                    ImpactLevel.MEDIUM, 45.0,
+                    "CREATE INDEX idx_table_jsonb ON table USING GIN(jsonb_column);");
+        }
+    }
+
+    private void analyzeOutdatedStats(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (ctx.metrics.actualRows > 0 && ctx.metrics.plannedRows > 0) {
+            double ratio = Math.abs(ctx.metrics.actualRows - ctx.metrics.plannedRows) / (double) ctx.metrics.actualRows;
+            if (ratio > 2.0) {
+                double improvement = Math.min(80.0, ratio * 20.0);
+                addRecommendation(recommendations, RecommendationType.UPDATE_STATISTICS,
+                        "Статистика оптимизатора устарела (оценка строк отличается от реальной более чем в 2 раза). Выполните ANALYZE.",
+                        ImpactLevel.HIGH, improvement, "ANALYZE;");
+            }
+        }
+    }
+
+    private void generateOptimizedQueries(List<Recommendation> recommendations, AnalysisContext ctx) {
+        if (!ctx.hasLimit && ctx.metrics.actualRows > 500) {
+            double improvement = calculateLimitImprovement(ctx.metrics.actualRows);
+            String modifiedQuery = ctx.originalQuery + " LIMIT 100";
+            addRecommendation(recommendations, RecommendationType.ADD_LIMIT,
+                    "Запрос возвращает много строк. Добавьте LIMIT для снижения нагрузки.",
+                    ImpactLevel.LOW, improvement, modifiedQuery);
+        }
+    }
+
+
+
+    private double calculateIndexImprovement(long actualRows, long totalRows, String filter) {
+
+        if (totalRows <= 0) totalRows = actualRows;
+        if (actualRows == 0) return 50.0;
+
+
+        double selectivity = (double) actualRows / totalRows;
+
+        if (selectivity >= 0.3) return 30.0;
+
+        double improvement = (1.0 - selectivity) * 100.0;
+        return Math.min(95.0, Math.max(20.0, improvement));
+    }
+
+    private double calculateLimitImprovement(long actualRows) {
+        if (actualRows <= 0) return 0;
+        long limitRows = 100;
+        if (actualRows <= limitRows) return 0;
+        double reduction = 1.0 - (double) limitRows / actualRows;
+
+        return 10;
     }
 
     private void collectMetrics(JsonNode node, PlanMetrics metrics) {
@@ -92,21 +302,18 @@ public class PlanAnalyzer {
             case "Index Scan":
             case "Index Only Scan":
                 metrics.indexScanCount++;
-                if ("Index Only Scan".equals(nodeType)) metrics.indexOnlyScanCount++;
-                String idx = getNodeText(node, "Index Name");
-                if (!idx.isEmpty()) metrics.usedIndexes.add(idx);
-                break;
-            case "Bitmap Heap Scan":
-                metrics.bitmapScanCount++;
                 break;
             case "Nested Loop":
-            case "Hash Join":
-            case "Merge Join":
+                metrics.nestedLoopCount++;
                 metrics.joinCount++;
-                metrics.maxJoinRows = Math.max(metrics.maxJoinRows, getNodeLong(node, "Actual Rows"));
-                if ("Nested Loop".equals(nodeType)) metrics.nestedLoopCount++;
-                else if ("Hash Join".equals(nodeType)) metrics.hashJoinCount++;
-                else metrics.mergeJoinCount++;
+                break;
+            case "Hash Join":
+                metrics.hashJoinCount++;
+                metrics.joinCount++;
+                break;
+            case "Merge Join":
+                metrics.mergeJoinCount++;
+                metrics.joinCount++;
                 break;
             case "Sort":
                 metrics.sortCount++;
@@ -119,29 +326,10 @@ public class PlanAnalyzer {
                 break;
             case "Aggregate":
             case "HashAggregate":
-            case "GroupAggregate":
                 metrics.aggregateCount++;
-                break;
-            case "WindowAgg":
-                metrics.windowFunctionCount++;
-                break;
-            case "CTE Scan":
-                metrics.cteScanCount++;
                 break;
             case "Subquery Scan":
                 metrics.subqueryCount++;
-                break;
-            case "Materialize":
-                metrics.materializeCount++;
-                break;
-            case "Hash":
-                metrics.hashCount++;
-                break;
-            case "Limit":
-                metrics.limitCount++;
-                break;
-            case "Recursive Union":
-                metrics.recursiveUnionCount++;
                 break;
         }
 
@@ -149,10 +337,6 @@ public class PlanAnalyzer {
         metrics.sharedReadBlocks += getNodeLong(node, "Shared Read Blocks");
         metrics.tempReadBlocks += getNodeLong(node, "Temp Read Blocks");
         metrics.tempWrittenBlocks += getNodeLong(node, "Temp Written Blocks");
-
-        if (node.has("Filter")) metrics.filterCount++;
-        if (node.has("Join Filter")) metrics.joinFilterCount++;
-        if (node.has("Index Cond")) metrics.indexConditionCount++;
 
         JsonNode plans = node.get("Plans");
         if (plans != null && plans.isArray()) {
@@ -177,6 +361,10 @@ public class PlanAnalyzer {
 
     private void analyzeOriginalQuery(AnalysisContext context) {
         if (context.originalQuery == null) return;
+        String upper = context.originalQuery.toUpperCase();
+        context.hasLimit = upper.contains("LIMIT");
+        context.hasDistinct = upper.contains("DISTINCT");
+
         try {
             net.sf.jsqlparser.statement.Statement stmt = CCJSqlParserUtil.parse(context.originalQuery);
             if (stmt instanceof Select) {
@@ -197,8 +385,7 @@ public class PlanAnalyzer {
                 }
             }
         } catch (JSQLParserException e) {
-            log.debug("JSqlParser failed, using heuristics");
-            extractColumnsHeuristic(context.originalQuery, context.whereColumns);
+            log.debug("JSqlParser не смог разобрать запрос, используются эвристики");
         }
     }
 
@@ -212,152 +399,21 @@ public class PlanAnalyzer {
         });
     }
 
-    private void extractColumnsHeuristic(String sql, Set<String> target) {
-        Pattern p = Pattern.compile("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\b");
-        Matcher m = p.matcher(sql.toUpperCase());
+    private List<String> extractColumnsFromFilter(String filter) {
+        List<String> cols = new ArrayList<>();
+        Pattern p = Pattern.compile("\\b([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?:=|>|<|>=|<=|LIKE|IN)");
+        Matcher m = p.matcher(filter);
         while (m.find()) {
-            String word = m.group(1);
-            if (!isKeyword(word)) target.add(word);
+            cols.add(m.group(1));
         }
+        return cols;
     }
 
-    private boolean isKeyword(String word) {
-        Set<String> keywords = Set.of("SELECT", "FROM", "WHERE", "AND", "OR", "NOT", "NULL",
-                "JOIN", "ON", "AS", "IN", "LIKE", "BETWEEN", "IS", "ORDER", "BY", "GROUP", "HAVING");
-        return keywords.contains(word);
-    }
-
-    private void analyzeScans(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        if (node == null) return;
-        String nodeType = getNodeText(node, "Node Type");
-        if ("Seq Scan".equals(nodeType)) {
-            long rows = getNodeLong(node, "Actual Rows");
-            String filter = getNodeText(node, "Filter");
-            String table = getNodeText(node, "Relation Name");
-            if (!filter.isEmpty() && rows > properties.getSeqScanThreshold()) {
-                List<String> cols = new ArrayList<>(ctx.whereColumns);
-                if (!cols.isEmpty()) {
-                    String idxCmd = String.format("CREATE INDEX idx_%s_%s ON %s(%s);",
-                            table, cols.get(0).toLowerCase(), table, String.join(",", cols));
-                    addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
-                            "Seq Scan на " + table + " (" + rows + " строк). Создайте индекс.",
-                            ImpactLevel.HIGH, 40.0, idxCmd);
-                }
-            }
-        }
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeScans(child, recommendations, ctx);
-        }
-    }
-
-    private void analyzeJoins(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        if (node == null) return;
-        String nodeType = getNodeText(node, "Node Type");
-        if (nodeType.contains("Join")) {
-            if (!node.has("Join Filter") && !node.has("Hash Cond") && !node.has("Merge Cond")) {
-                addRecommendation(recommendations, RecommendationType.REWRITE_QUERY,
-                        "Cartesian join detected. Add join condition.",
-                        ImpactLevel.HIGH, 70.0, null);
-            }
-        }
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeJoins(child, recommendations, ctx);
-        }
-    }
-
-    private void analyzeSortOperations(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        if (node == null) return;
-        if ("Sort".equals(getNodeText(node, "Node Type"))) {
-            long rows = getNodeLong(node, "Actual Rows");
-            if (rows > 5000 && !ctx.orderByColumns.isEmpty()) {
-                String table = findTableForSort(node, ctx);
-                if (table != null && !ctx.orderByColumns.isEmpty()) {
-                    String idxCmd = String.format("CREATE INDEX idx_%s_sort ON %s(%s);",
-                            table, table, String.join(",", ctx.orderByColumns));
-                    addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
-                            "Sort of " + rows + " rows. Create index to avoid sort.",
-                            ImpactLevel.MEDIUM, 35.0, idxCmd);
-                }
-            }
-        }
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeSortOperations(child, recommendations, ctx);
-        }
-    }
-
-    private String findTableForSort(JsonNode node, AnalysisContext ctx) {
-        JsonNode current = node;
-        while (current != null) {
-            if (getNodeText(current, "Node Type").contains("Scan")) {
-                return getNodeText(current, "Relation Name");
-            }
-            JsonNode parent = current.get("Parent");
-            break;
-        }
+    private String findTableForSort(AnalysisContext ctx) {
         if (!ctx.scanNodes.isEmpty()) {
             return getNodeText(ctx.scanNodes.get(0), "Relation Name");
         }
         return null;
-    }
-
-    private void analyzeAggregations(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeAggregations(child, recommendations, ctx);
-        }
-    }
-
-    private void analyzeMemoryUsage(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        long tempRead = getNodeLong(node, "Temp Read Blocks");
-        long tempWrite = getNodeLong(node, "Temp Written Blocks");
-        if (tempRead + tempWrite > properties.getHighBufferThreshold()) {
-            addRecommendation(recommendations, RecommendationType.INCREASE_WORK_MEM,
-                    "Disk temporary operations detected. Increase work_mem.",
-                    ImpactLevel.MEDIUM, 40.0, null);
-        }
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeMemoryUsage(child, recommendations, ctx);
-        }
-    }
-
-    private void analyzeParallelism(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeParallelism(child, recommendations, ctx);
-        }
-    }
-
-    private void analyzeSubqueries(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        String nodeType = getNodeText(node, "Node Type");
-        if ("Subquery Scan".equals(nodeType) && getNodeLong(node, "Actual Rows") > 10000) {
-            addRecommendation(recommendations, RecommendationType.REWRITE_QUERY,
-                    "Subquery processes many rows. Consider rewriting as JOIN.",
-                    ImpactLevel.MEDIUM, 30.0, null);
-        }
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeSubqueries(child, recommendations, ctx);
-        }
-    }
-
-    private void analyzeIndexUsage(JsonNode node, List<Recommendation> recommendations, AnalysisContext ctx) {
-        JsonNode plans = node.get("Plans");
-        if (plans != null && plans.isArray()) {
-            for (JsonNode child : plans) analyzeIndexUsage(child, recommendations, ctx);
-        }
-    }
-
-    private void generateOptimizedQueries(List<Recommendation> recommendations, AnalysisContext ctx) {
-        if (ctx.originalQuery != null && !ctx.originalQuery.toUpperCase().contains("LIMIT") &&
-                ctx.metrics.actualRows > 1000) {
-            addRecommendation(recommendations, RecommendationType.ADD_LIMIT,
-                    "Add LIMIT to reduce result set.",
-                    ImpactLevel.LOW, 15.0, ctx.originalQuery + " LIMIT 100");
-        }
     }
 
     private void addRecommendation(List<Recommendation> list, RecommendationType type,
@@ -377,10 +433,12 @@ public class PlanAnalyzer {
 
     private String generateSqlSuggestion(RecommendationType type) {
         return switch (type) {
-            case CREATE_INDEX -> "CREATE INDEX idx_name ON table(column);";
-            case ADD_LIMIT -> "SELECT ... LIMIT N;";
-            case INCREASE_WORK_MEM -> "SET work_mem = '64MB';";
-            default -> "Review query execution plan.";
+            case CREATE_INDEX -> "Создать индекс: CREATE INDEX ...;";
+            case ADD_LIMIT -> "Добавить LIMIT: SELECT ... LIMIT N;";
+            case INCREASE_WORK_MEM -> "Увеличить work_mem: SET work_mem = '64MB';";
+            case UPDATE_STATISTICS -> "Обновить статистику: ANALYZE;";
+            case CHANGE_JOIN_TYPE -> "Изменить тип соединения (например, использовать Hash Join)";
+            default -> "Проверьте план выполнения запроса.";
         };
     }
 
@@ -414,7 +472,7 @@ public class PlanAnalyzer {
                 .impact(ImpactLevel.HIGH)
                 .estimatedImprovement(0.0)
                 .applied(false)
-                .warnings(List.of("Analysis error"))
+                .warnings(List.of("Ошибка анализа"))
                 .build();
     }
 

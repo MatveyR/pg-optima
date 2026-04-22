@@ -1,64 +1,34 @@
 import { useState, useEffect } from 'react';
 import { Clock, Play, Trash2, FileCode, Database, Search } from 'lucide-react';
 import { useNavigate } from 'react-router';
-import { connectionsApi } from '../../api/connections';
-import { ConnectionDTO } from '../../types/api.types';
-
-interface QueryHistoryItem {
-  id: string;
-  query: string;
-  connectionId: number;
-  connectionName: string;
-  executionTime: number;
-  timestamp: Date;
-  rowCount: number;
-}
-
-// Заглушка – загружаем историю из localStorage
-const loadHistoryFromStorage = (): QueryHistoryItem[] => {
-  const stored = localStorage.getItem('pgoptima_query_history');
-  if (stored) return JSON.parse(stored);
-  return [];
-};
-
-const saveHistoryToStorage = (history: QueryHistoryItem[]) => {
-  localStorage.setItem('pgoptima_query_history', JSON.stringify(history));
-};
+import { loadHistory, deleteQueryFromHistory, QueryHistoryItem } from '../../store/historyStorage';
 
 export function History() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState('');
   const [history, setHistory] = useState<QueryHistoryItem[]>([]);
-  const [connections, setConnections] = useState<ConnectionDTO[]>([]);
 
   useEffect(() => {
-    loadConnections();
-    setHistory(loadHistoryFromStorage());
+    loadHistoryFromStorage();
   }, []);
 
-  const loadConnections = async () => {
-    try {
-      const { data } = await connectionsApi.getAll();
-      setConnections(data);
-    } catch (error) {
-      console.error('Failed to load connections', error);
-    }
+  const loadHistoryFromStorage = () => {
+    setHistory(loadHistory());
   };
 
-  const handleRerun = (query: string) => {
-    // Переход на редактор с предзаполненным запросом (можно через state или query param)
-    navigate('/', { state: { initialQuery: query } });
+  const handleRerun = (item: QueryHistoryItem) => {
+    // Переходим на главную страницу и передаём запрос через state
+    navigate('/', { state: { initialQuery: item.query, initialConnectionId: item.connectionId } });
   };
 
   const handleDelete = (id: string) => {
-    const newHistory = history.filter(item => item.id !== id);
-    setHistory(newHistory);
-    saveHistoryToStorage(newHistory);
+    deleteQueryFromHistory(id);
+    setHistory(prev => prev.filter(item => item.id !== id));
   };
 
-  const formatTimestamp = (date: Date) => {
-    const now = new Date();
-    const diff = now.getTime() - date.getTime();
+  const formatTimestamp = (timestamp: number) => {
+    const now = Date.now();
+    const diff = now - timestamp;
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const days = Math.floor(hours / 24);
     if (days > 0) return `${days} дн. назад`;
@@ -125,7 +95,7 @@ export function History() {
                      onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--pg-border)'; e.currentTarget.style.transform = 'translateX(0)'; }}
                 >
                   <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3 flex-1">
+                    <div className="flex items-center gap-3 flex-1 flex-wrap">
                       <div className="px-2 py-1 rounded text-xs font-bold" style={{ backgroundColor: `${getQueryTypeColor(queryType)}15`, color: getQueryTypeColor(queryType) }}>
                         {queryType}
                       </div>
@@ -135,11 +105,11 @@ export function History() {
                       </div>
                       <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--pg-text-muted)' }}>
                         <Clock className="w-3.5 h-3.5" />
-                        {formatTimestamp(new Date(item.timestamp))}
+                        {formatTimestamp(item.timestamp)}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => handleRerun(item.query)} className="p-2 rounded-lg transition-colors" style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-secondary)' }}
+                      <button onClick={() => handleRerun(item)} className="p-2 rounded-lg transition-colors" style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-secondary)' }}
                               onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-accent)'; }}
                               onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-secondary)'; }}>
                         <Play className="w-4 h-4" />
@@ -155,7 +125,7 @@ export function History() {
                     <code className="text-xs font-mono" style={{ color: 'var(--pg-text-secondary)' }}>{item.query}</code>
                   </div>
                   <div className="flex items-center gap-4 text-xs" style={{ color: 'var(--pg-text-muted)' }}>
-                    <div><span className="font-medium" style={{ color: 'var(--pg-text-primary)' }}>{item.executionTime}мс</span> время выполнения</div>
+                    <div><span className="font-medium" style={{ color: 'var(--pg-text-primary)' }}>{item.executionTimeMs}мс</span> время выполнения</div>
                     <div><span className="font-medium" style={{ color: 'var(--pg-text-primary)' }}>{item.rowCount.toLocaleString()}</span> строк затронуто</div>
                   </div>
                 </div>

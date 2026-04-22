@@ -5,6 +5,7 @@ import { Connections } from "./pages/Connections";
 import { SQLEditor } from "./pages/SQLEditor";
 import { History } from "./pages/History";
 import { Settings } from "./pages/Settings";
+import { ProtectedRoute} from "./components/ProtectedRoute";
 
 export const router = createBrowserRouter([
   {
@@ -12,13 +13,18 @@ export const router = createBrowserRouter([
     Component: Login,
   },
   {
-    path: "/",
-    Component: Layout,
+    Component: ProtectedRoute,
     children: [
-      { index: true, Component: SQLEditor },
-      { path: "connections", Component: Connections },
-      { path: "history", Component: History },
-      { path: "settings", Component: Settings },
+      {
+        path: "/",
+        Component: Layout,
+        children: [
+          { index: true, Component: SQLEditor },
+          { path: "connections", Component: Connections },
+          { path: "history", Component: History },
+          { path: "settings", Component: Settings },
+        ],
+      },
     ],
   },
 ]);

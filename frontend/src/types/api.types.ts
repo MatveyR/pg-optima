@@ -12,14 +12,17 @@ export interface RegisterRequest {
 
 export interface UserDTO {
     id: number;
-    name: string;
+    fullName: string;
     email: string;
-    createdAt: string;
+    role?: string;
+    createdAt?: string;
 }
 
 export interface LoginResponse {
     accessToken: string;
     refreshToken: string;
+    tokenType?: string;
+    expiresIn?: number;
     user: UserDTO;
 }
 
@@ -35,7 +38,12 @@ export interface ConnectionDTO {
     port: number;
     database: string;
     username: string;
-    createdAt: string;
+    password?: string;          // только при внутренних вызовах
+    sslMode?: string;
+    status?: string;
+    ownerId?: number;
+    createdAt?: string;
+    updatedAt?: string;
 }
 
 export interface CreateConnectionRequest {
@@ -45,7 +53,8 @@ export interface CreateConnectionRequest {
     database: string;
     username: string;
     password: string;
-    sslMode?: 'disable' | 'prefer' | 'require';
+    sslMode?: string;
+    databaseType?: string;
 }
 
 export type UpdateConnectionRequest = Partial<CreateConnectionRequest>;
@@ -55,8 +64,9 @@ export interface ProjectDTO {
     id: number;
     name: string;
     description?: string;
-    createdAt: string;
-    updatedAt: string;
+    ownerId?: number;
+    createdAt?: string;
+    savedQueries?: SavedQueryDTO[];
 }
 
 export interface CreateProjectRequest {
@@ -66,43 +76,63 @@ export interface CreateProjectRequest {
 
 export interface SavedQueryDTO {
     id: number;
-    projectId: number;
     name: string;
-    sqlText: string;
-    createdAt: string;
+    sqlQuery: string;
+    description?: string;
+    projectId: number;
+    createdAt?: string;
+    updatedAt?: string;
 }
 
 export interface SaveQueryRequest {
     projectId: number;
     name: string;
-    sqlText: string;
+    sqlQuery: string;
+    description?: string;
 }
 
 // Анализ запросов
 export interface AnalysisRequest {
     connectionId: number;
-    query: string;
+    sqlQuery: string;
     autoApply?: boolean;
+    timeoutSeconds?: number;
+    includeStatistics?: boolean;
+}
+
+export interface Recommendation {
+    type: string;
+    description: string;
+    impact: 'Высокий' | 'Средний' | 'Низкий' | 'Информационный';
+    estimatedImprovement?: number;
+    actualImprovement?: number;
+    sqlSuggestion?: string;
+    sqlCommand?: string;
+    applied?: boolean;
+    warnings?: string[];
+    metrics?: Record<string, any>;
 }
 
 export interface AnalysisResponse {
+    success: boolean;
+    errorMessage?: string;
     originalQuery: string;
-    optimizedQuery: string;
-    executionTimeMs: number;
-    estimatedImprovementPercent: number;
-    issues: Array<{
-        severity: 'high' | 'medium' | 'low';
-        title: string;
-        description: string;
-        suggestion: string;
-    }>;
+    executionPlanJson?: string;
+    originalExecutionTimeMs: number;      // миллисекунды
+    analysisDurationMs: number;           // миллисекунды
+    requestTimestamp?: string;
+    recommendations: Recommendation[];    // вместо issues
+    optimizationStatistics?: Record<string, any>;
+    optimizationReport?: string;
 }
 
 export interface AsyncAnalysisResponse {
     taskId: string;
-    status: 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+    status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+    createdAt?: string;
+    completedAt?: string;
     result?: AnalysisResponse;
-    error?: string;
+    errorMessage?: string;
 }
 
 export interface ExecuteRequest {

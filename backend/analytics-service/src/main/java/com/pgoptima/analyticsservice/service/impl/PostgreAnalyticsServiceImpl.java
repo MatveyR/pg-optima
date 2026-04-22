@@ -2,7 +2,6 @@ package com.pgoptima.analyticsservice.service.impl;
 
 import com.pgoptima.analyticsservice.client.UserServiceClient;
 import com.pgoptima.analyticsservice.config.PlanAnalyzerProperties;
-import com.pgoptima.analyticsservice.dto.ConnectionDetails;
 import com.pgoptima.analyticsservice.repository.OptimizationHistoryRepository;
 import com.pgoptima.analyticsservice.repository.RecommendationResultRepository;
 import com.pgoptima.analyticsservice.service.AnalyticsService;
@@ -13,11 +12,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.pgoptima.shareddto.request.AnalysisRequest;
 import com.pgoptima.shareddto.request.ExecuteRequest;
 import com.pgoptima.shareddto.response.AnalysisResponse;
+import com.pgoptima.shareddto.response.ConnectionDTO;
 import com.pgoptima.shareddto.response.ExecuteResponse;
 import com.pgoptima.shareddto.response.Recommendation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.sql.*;
@@ -35,9 +34,8 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
     private final PlanAnalyzerProperties properties;
 
     @Override
-    @Cacheable(value = "analysisResults", key = "#request.connectionId + '-' + #request.sqlQuery.hashCode()", unless = "#result.success == false")
     public AnalysisResponse analyzeQuery(AnalysisRequest request, String authHeader) {
-        log.info("Starting analysis for connectionId={}, query length={}", request.getConnectionId(), request.getSqlQuery().length());
+        log.info("Начало анализа: connectionId={}, длина запроса={}", request.getConnectionId(), request.getSqlQuery().length());
         Instant start = Instant.now();
         AnalysisResponse response = AnalysisResponse.builder()
                 .originalQuery(request.getSqlQuery())
@@ -45,80 +43,80 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                 .success(false)
                 .build();
 
-        // Проверка на модифицирующие запросы
         if (SqlQueryTypeDetector.isModifyingQuery(request.getSqlQuery()) && !properties.isAllowModifyingQueries()) {
-            response.setErrorMessage("Modifying queries (INSERT/UPDATE/DELETE) are not allowed for analysis.");
-            log.warn("Rejected modifying query: {}", request.getSqlQuery());
+            response.setErrorMessage("Модифицирующие запросы (INSERT/UPDATE/DELETE) не разрешены для анализа.");
             return response;
         }
 
-        // Получение деталей подключения
-        ConnectionDetails connection;
+        ConnectionDTO connection;
         try {
             connection = userServiceClient.getConnectionById(request.getConnectionId(), authHeader);
+            if (connection.getPassword() == null) {
+                throw new RuntimeException("Пароль подключения отсутствует");
+            }
         } catch (Exception e) {
-            log.error("Failed to fetch connection details: {}", e.getMessage(), e);
-            response.setErrorMessage("Failed to fetch connection details: " + e.getMessage());
+            log.error("Ошибка получения данных подключения: {}", e.getMessage(), e);
+            response.setErrorMessage("Не удалось получить данные подключения: " + e.getMessage());
             return response;
         }
 
-        // Выполнение EXPLAIN
         PlanExecutionResult execResult;
         try {
             execResult = executeExplain(request.getSqlQuery(), connection);
-        } catch (SQLException e) {
-            log.error("Database error during EXPLAIN: {}", e.getMessage(), e);
-            response.setErrorMessage("Database error: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Ошибка базы данных при EXPLAIN: {}", e.getMessage(), e);
+            response.setErrorMessage("Ошибка базы данных: " + e.getMessage());
             return response;
         }
 
         response.setExecutionPlanJson(execResult.planJson);
-        response.setOriginalExecutionTime(execResult.executionTime);
+        response.setOriginalExecutionTimeMs(execResult.executionTimeMs);
 
-        // Анализ плана
         List<Recommendation> recommendations;
         try {
             JsonNode plan = PostgrePlanParser.parse(execResult.planJson);
             recommendations = planAnalyzer.analyze(plan, request.getSqlQuery());
         } catch (Exception e) {
-            log.error("Plan analysis failed: {}", e.getMessage(), e);
-            response.setErrorMessage("Plan analysis failed: " + e.getMessage());
+            log.error("Ошибка анализа плана: {}", e.getMessage(), e);
+            response.setErrorMessage("Ошибка анализа плана: " + e.getMessage());
             return response;
         }
 
         response.setRecommendations(recommendations);
         response.setSuccess(true);
-        response.setAnalysisDuration(Duration.between(start, Instant.now()));
-        log.info("Analysis completed in {} ms, found {} recommendations", response.getAnalysisDuration().toMillis(), recommendations.size());
-
+        response.setAnalysisDurationMs(Duration.between(start, Instant.now()).toMillis());
+        log.info("Анализ завершён за {} мс, найдено рекомендаций: {}", response.getAnalysisDurationMs(), recommendations.size());
         return response;
     }
 
     @Override
     public ExecuteResponse executeQuery(ExecuteRequest request, String authHeader) {
-        log.info("Executing query for connectionId={}", request.getConnectionId());
+        log.info("Выполнение запроса для connectionId={}", request.getConnectionId());
         Instant start = Instant.now();
 
-        ConnectionDetails connection;
+        ConnectionDTO connection;
         try {
             connection = userServiceClient.getConnectionById(request.getConnectionId(), authHeader);
+            if (connection.getPassword() == null) {
+                throw new RuntimeException("Пароль отсутствует");
+            }
         } catch (Exception e) {
-            log.error("Failed to fetch connection details: {}", e.getMessage(), e);
+            log.error("Ошибка получения подключения: {}", e.getMessage(), e);
             return ExecuteResponse.builder()
                     .success(false)
-                    .errorMessage("Failed to fetch connection details: " + e.getMessage())
+                    .errorMessage("Ошибка получения подключения: " + e.getMessage())
                     .build();
         }
 
         String url = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
-                connection.getHost(), connection.getPort(), connection.getDatabase(), connection.getSslMode());
+                connection.getHost(), connection.getPort(), connection.getDatabase(),
+                connection.getSslMode() != null ? connection.getSslMode() : "disable");
 
         try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
             try (Statement stmt = conn.createStatement()) {
                 stmt.setFetchSize(1000);
                 boolean isSelect = stmt.execute(request.getQuery());
                 if (!isSelect) {
-                    // Для не-SELECT запросов возвращаем количество затронутых строк
                     int updateCount = stmt.getUpdateCount();
                     long duration = Duration.between(start, Instant.now()).toMillis();
                     return ExecuteResponse.builder()
@@ -147,9 +145,8 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                         }
                         rows.add(row);
                         rowCount++;
-                        // Ограничим количество строк, чтобы не перегружать память (например, 10000)
                         if (rowCount > 10000) {
-                            log.warn("Result set truncated at 10000 rows");
+                            log.warn("Результат обрезан на 10000 строк");
                             break;
                         }
                     }
@@ -164,35 +161,39 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                 }
             }
         } catch (SQLException e) {
-            log.error("Query execution failed: {}", e.getMessage(), e);
+            log.error("Ошибка выполнения запроса: {}", e.getMessage(), e);
             return ExecuteResponse.builder()
                     .success(false)
-                    .errorMessage("SQL error: " + e.getMessage())
+                    .errorMessage("SQL ошибка: " + e.getMessage())
                     .build();
         }
     }
 
-    private PlanExecutionResult executeExplain(String sql, ConnectionDetails conn) throws SQLException {
+    private PlanExecutionResult executeExplain(String sql, ConnectionDTO conn) throws Exception {
         String url = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
-                conn.getHost(), conn.getPort(), conn.getDatabase(), conn.getSslMode());
+                conn.getHost(), conn.getPort(), conn.getDatabase(),
+                conn.getSslMode() != null ? conn.getSslMode() : "disable");
         try (Connection connection = DriverManager.getConnection(url, conn.getUsername(), conn.getPassword())) {
             String explainSql = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) " + sql;
-            Instant queryStart = Instant.now();
             try (Statement stmt = connection.createStatement();
                  ResultSet rs = stmt.executeQuery(explainSql)) {
                 String planJson = rs.next() ? rs.getString(1) : null;
-                Duration execTime = Duration.between(queryStart, Instant.now());
-                return new PlanExecutionResult(planJson, execTime);
+                long actualTimeMs = 0;
+                if (planJson != null) {
+                    JsonNode root = PostgrePlanParser.parse(planJson);
+                    actualTimeMs = (long) root.path("Actual Total Time").asDouble(0);
+                }
+                return new PlanExecutionResult(planJson, actualTimeMs);
             }
         }
     }
 
     private static class PlanExecutionResult {
         String planJson;
-        Duration executionTime;
-        PlanExecutionResult(String planJson, Duration executionTime) {
+        long executionTimeMs;
+        PlanExecutionResult(String planJson, long executionTimeMs) {
             this.planJson = planJson;
-            this.executionTime = executionTime;
+            this.executionTimeMs = executionTimeMs;
         }
     }
 }

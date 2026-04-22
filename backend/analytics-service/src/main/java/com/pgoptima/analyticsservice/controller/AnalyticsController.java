@@ -11,11 +11,13 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/optimization")
 @RequiredArgsConstructor
@@ -26,10 +28,12 @@ public class AnalyticsController {
     private final AsyncAnalysisService asyncAnalysisService;
 
     @PostMapping("/analyze-only")
-    @Operation(summary = "Analyze query (no auto-apply)")
+    @Operation(summary = "Analyze only (no auto-apply)")
     public ResponseEntity<AnalysisResponse> analyzeOnly(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @Valid @RequestBody AnalysisRequest request) {
+
+        log.info("=== analyze-only called: connectionId={}, query length={} ===", request.getConnectionId(), request.getSqlQuery().length());
         request.setAutoApply(false);
         return ResponseEntity.ok(analyticsService.analyzeQuery(request, authHeader));
     }

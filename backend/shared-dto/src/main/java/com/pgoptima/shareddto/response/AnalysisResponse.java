@@ -20,8 +20,8 @@ public class AnalysisResponse {
     private String errorMessage;
     private String originalQuery;
     private String executionPlanJson;
-    private Duration originalExecutionTime;
-    private Duration analysisDuration;
+    private Long originalExecutionTimeMs;
+    private Long analysisDurationMs;
     private Instant requestTimestamp;
     private List<Recommendation> recommendations;
     private Map<String, Object> optimizationStatistics;

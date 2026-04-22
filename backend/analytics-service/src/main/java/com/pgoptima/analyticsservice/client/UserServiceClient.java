@@ -1,6 +1,6 @@
 package com.pgoptima.analyticsservice.client;
 
-import com.pgoptima.analyticsservice.dto.ConnectionDetails;
+import com.pgoptima.shareddto.response.ConnectionDTO;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -10,6 +10,6 @@ import org.springframework.web.bind.annotation.RequestHeader;
 public interface UserServiceClient {
 
     @GetMapping("/internal/connections/{id}")
-    ConnectionDetails getConnectionById(@PathVariable("id") Long id,
-                                        @RequestHeader(value = "Authorization", required = false) String authHeader);
+    ConnectionDTO getConnectionById(@PathVariable("id") Long id,
+                                    @RequestHeader(value = "Authorization", required = false) String authHeader);
 }

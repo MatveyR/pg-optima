@@ -42,7 +42,7 @@ export function Login() {
                 navigate('/');
             }
         } catch (err: any) {
-            setError(err.response?.data?.message || 'Ошибка аутентификации');
+            setError(err.response?.data?.message || 'Неверный логин или пароль');
         } finally {
             setLoading(false);
         }
