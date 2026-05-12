@@ -38,7 +38,7 @@ export interface ConnectionDTO {
     port: number;
     database: string;
     username: string;
-    password?: string;          // только при внутренних вызовах
+    password?: string;
     sslMode?: string;
     status?: string;
     ownerId?: number;
@@ -91,13 +91,14 @@ export interface SaveQueryRequest {
     description?: string;
 }
 
-// Анализ запросов
 export interface AnalysisRequest {
     connectionId: number;
     sqlQuery: string;
     autoApply?: boolean;
     timeoutSeconds?: number;
     includeStatistics?: boolean;
+    iterations?: number;
+    applyRecommendations?: boolean;
 }
 
 export interface Recommendation {
@@ -118,10 +119,10 @@ export interface AnalysisResponse {
     errorMessage?: string;
     originalQuery: string;
     executionPlanJson?: string;
-    originalExecutionTimeMs: number;      // миллисекунды
-    analysisDurationMs: number;           // миллисекунды
+    originalExecutionTimeMs: number;
+    analysisDurationMs: number;
     requestTimestamp?: string;
-    recommendations: Recommendation[];    // вместо issues
+    recommendations: Recommendation[];
     optimizationStatistics?: Record<string, any>;
     optimizationReport?: string;
 }
@@ -138,6 +139,7 @@ export interface AsyncAnalysisResponse {
 export interface ExecuteRequest {
     connectionId: number;
     query: string;
+    iterations?: number;
 }
 
 export interface ExecuteResponse {

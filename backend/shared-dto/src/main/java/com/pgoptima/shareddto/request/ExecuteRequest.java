@@ -10,4 +10,5 @@ public class ExecuteRequest {
     private Long connectionId;
     @NotBlank
     private String query;
+    private Integer iterations = 1;
 }

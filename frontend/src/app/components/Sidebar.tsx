@@ -12,8 +12,7 @@ export function Sidebar() {
     const navItems = [
         { path: '/', label: 'Редактор SQL', icon: FileCode },
         { path: '/connections', label: 'Подключения', icon: Database },
-        { path: '/history', label: 'История', icon: History },
-        { path: '/settings', label: 'Настройки', icon: Settings },
+        { path: '/history', label: 'История', icon: History }
     ];
 
     const handleLogout = () => {

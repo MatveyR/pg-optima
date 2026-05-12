@@ -28,4 +28,5 @@ public class Recommendation {
     private Double actualImprovement;
     private Map<String, Object> metrics;
     private List<String> warnings;
+    private String optimizedQuery;
 }

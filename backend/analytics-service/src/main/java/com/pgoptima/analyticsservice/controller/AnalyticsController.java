@@ -32,8 +32,7 @@ public class AnalyticsController {
     public ResponseEntity<AnalysisResponse> analyzeOnly(
             @RequestHeader(value = "Authorization", required = false) String authHeader,
             @Valid @RequestBody AnalysisRequest request) {
-
-        log.info("=== analyze-only called: connectionId={}, query length={} ===", request.getConnectionId(), request.getSqlQuery().length());
+        log.info("analyze-only called: connectionId={}, iterations={}, apply={}", request.getConnectionId(), request.getIterations(), request.getApplyRecommendations());
         request.setAutoApply(false);
         return ResponseEntity.ok(analyticsService.analyzeQuery(request, authHeader));
     }
@@ -66,7 +65,6 @@ public class AnalyticsController {
     @GetMapping("/stats")
     @Operation(summary = "Optimization statistics")
     public ResponseEntity<Map<String, Object>> getStats() {
-        // Заглушка, можно реализовать позже
         return ResponseEntity.ok(Map.of(
                 "total_analyses", 0,
                 "successful_optimizations", 0,
