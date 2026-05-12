@@ -121,7 +121,6 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                             String safeCommand = sanitizeIndexCommand(rec.getSqlCommand());
                             try (java.sql.Statement stmt = conn.createStatement()) {
                                 stmt.execute(safeCommand);
-                                conn.commit();
                             }
                         }
                         PlanExecutionResult optimizedResult = executeExplain(request.getSqlQuery(), connection, iterations);
@@ -311,12 +310,8 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
     }
 
     private String sanitizeIndexCommand(String sqlCmd) {
-        sqlCmd = sqlCmd.replaceAll("(?i)CONCURRENTLY", "");
-        sqlCmd = sqlCmd.replaceAll("(?i)IF NOT EXISTS", "");
+        sqlCmd = sqlCmd.replaceAll("(?i)CONCURRENTLY\\s*", "");
         sqlCmd = sqlCmd.replaceAll("\\s+", " ").trim();
-        if (!sqlCmd.toUpperCase().startsWith("CREATE INDEX")) {
-            return sqlCmd;
-        }
         return sqlCmd;
     }
 

@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.sf.jsqlparser.expression.BinaryExpression;
 import net.sf.jsqlparser.expression.Expression;
+import net.sf.jsqlparser.expression.Parenthesis;
 import net.sf.jsqlparser.expression.operators.conditional.AndExpression;
 import net.sf.jsqlparser.expression.operators.conditional.OrExpression;
 import net.sf.jsqlparser.expression.operators.relational.*;
@@ -70,7 +71,7 @@ public class PlanAnalyzer {
                     List<String> cols = extractColumnsFromFilter(filter);
                     if (!cols.isEmpty()) {
                         double improvement = calculateIndexImprovement(rows, totalRows, filter);
-                        String indexCmd = String.format("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_%s_%s ON %s(%s);",
+                        String indexCmd = String.format("CREATE INDEX IF NOT EXISTS idx_%s_%s ON %s(%s);",
                                 table, cols.get(0).toLowerCase(), table, String.join(", ", cols));
                         addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
                                 String.format("Полное сканирование таблицы «%s» (обработано %d строк). Создайте индекс для ускорения фильтрации.", table, rows),
@@ -93,18 +94,136 @@ public class PlanAnalyzer {
             else if (!mergeCond.isEmpty()) condition = mergeCond;
             else if (!joinFilter.isEmpty()) condition = joinFilter;
             if (condition == null) continue;
-            List<String> columns = extractColumnsFromCondition(condition);
-            if (columns.isEmpty()) continue;
-            String leftTable = extractTableFromPlan(joinNode, "Plans", 0);
-            String rightTable = extractTableFromPlan(joinNode, "Plans", 1);
-            String targetTable = leftTable != null ? leftTable : rightTable;
-            if (targetTable == null) targetTable = "table";
-            String indexCmd = String.format("CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_%s_join ON %s(%s);",
-                    targetTable, targetTable, String.join(", ", columns));
-            addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
-                    "Для ускорения JOIN-операций создайте индекс на столбцах: " + String.join(", ", columns),
-                    ImpactLevel.MEDIUM, 30.0, indexCmd);
+
+            List<String> qualifiedCols = extractQualifiedColumns(condition);
+            if (qualifiedCols.isEmpty()) continue;
+
+            JsonNode outer = getChildPlan(joinNode, 0);
+            JsonNode inner = getChildPlan(joinNode, 1);
+            String leftAlias = findAliasInPlan(outer);
+            String rightAlias = findAliasInPlan(inner);
+            String leftTable = findRelationNameInPlan(outer);
+            String rightTable = findRelationNameInPlan(inner);
+
+            Map<String, List<String>> tableColumns = new HashMap<>(); 
+            for (String qcol : qualifiedCols) {
+                String[] parts = qcol.split("\\.");
+                String alias = parts.length == 2 ? parts[0] : null;
+                String colName = parts.length == 2 ? parts[1] : parts[0];
+                String tableName = null;
+                if (alias != null) {
+                    if (alias.equalsIgnoreCase(leftAlias)) tableName = leftTable;
+                    else if (alias.equalsIgnoreCase(rightAlias)) tableName = rightTable;
+                }
+                if (tableName == null) {
+                    continue;
+                }
+                tableColumns.computeIfAbsent(tableName, k -> new ArrayList<>()).add(colName);
+            }
+
+            for (Map.Entry<String, List<String>> entry : tableColumns.entrySet()) {
+                String table = entry.getKey();
+                List<String> cols = entry.getValue();
+                if (table == null || cols.isEmpty()) continue;
+
+                Set<String> uniqueCols = new LinkedHashSet<>(cols);
+                String columnsStr = String.join("_", uniqueCols).toLowerCase();
+                String indexName = "idx_" + table + "_" + columnsStr;
+                String indexCmd = String.format("CREATE INDEX IF NOT EXISTS %s ON %s(%s);",
+                        indexName, table, String.join(", ", uniqueCols));
+
+                addRecommendation(recommendations, RecommendationType.CREATE_INDEX,
+                        "Для ускорения JOIN-операций создайте индекс на столбцах таблицы " + table + ": " + String.join(", ", uniqueCols),
+                        ImpactLevel.MEDIUM, 30.0, indexCmd);
+            }
         }
+    }
+
+    private List<String> extractQualifiedColumns(String condition) {
+        List<String> qualifiedCols = new ArrayList<>();
+        if (condition == null || condition.isEmpty()) return qualifiedCols;
+        try {
+            Expression expr = CCJSqlParserUtil.parseCondExpression(condition);
+            Deque<Expression> stack = new ArrayDeque<>();
+            stack.push(expr);
+            while (!stack.isEmpty()) {
+                Expression current = stack.pop();
+                if (current instanceof Column) {
+                    Column col = (Column) current;
+                    String alias = col.getTable() != null ? col.getTable().getName() : null;
+                    String name = col.getColumnName();
+                    if (name != null && !name.isEmpty()) {
+                        qualifiedCols.add(alias != null ? alias + "." + name : name);
+                    }
+                } else if (current instanceof BinaryExpression) {
+                    BinaryExpression bin = (BinaryExpression) current;
+                    if (bin.getLeftExpression() != null) stack.push(bin.getLeftExpression());
+                    if (bin.getRightExpression() != null) stack.push(bin.getRightExpression());
+                } else if (current instanceof LikeExpression) {
+                    LikeExpression like = (LikeExpression) current;
+                    if (like.getLeftExpression() != null) stack.push(like.getLeftExpression());
+                    if (like.getRightExpression() != null) stack.push(like.getRightExpression());
+                } else if (current instanceof InExpression) {
+                    InExpression in = (InExpression) current;
+                    if (in.getLeftExpression() != null) stack.push(in.getLeftExpression());
+                } else if (current instanceof Between) {
+                    Between between = (Between) current;
+                    if (between.getLeftExpression() != null) stack.push(between.getLeftExpression());
+                } else if (current instanceof Parenthesis) {
+                    Parenthesis paren = (Parenthesis) current;
+                    if (paren.getExpression() != null) stack.push(paren.getExpression());
+                } else if (current instanceof AndExpression || current instanceof OrExpression) {
+                    if (current instanceof AndExpression) {
+                        AndExpression and = (AndExpression) current;
+                        if (and.getLeftExpression() != null) stack.push(and.getLeftExpression());
+                        if (and.getRightExpression() != null) stack.push(and.getRightExpression());
+                    } else {
+                        OrExpression or = (OrExpression) current;
+                        if (or.getLeftExpression() != null) stack.push(or.getLeftExpression());
+                        if (or.getRightExpression() != null) stack.push(or.getRightExpression());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Failed to parse condition for qualified columns: {}", condition);
+        }
+        return qualifiedCols;
+    }
+
+    private JsonNode getChildPlan(JsonNode parent, int index) {
+        JsonNode plans = parent.get("Plans");
+        if (plans != null && plans.isArray() && plans.size() > index) {
+            return plans.get(index);
+        }
+        return null;
+    }
+
+    private String findAliasInPlan(JsonNode node) {
+        if (node == null) return null;
+        String alias = getNodeText(node, "Alias");
+        if (!alias.isEmpty()) return alias;
+        JsonNode plans = node.get("Plans");
+        if (plans != null && plans.isArray()) {
+            for (JsonNode child : plans) {
+                String result = findAliasInPlan(child);
+                if (result != null) return result;
+            }
+        }
+        return null;
+    }
+
+    private String findRelationNameInPlan(JsonNode node) {
+        if (node == null) return null;
+        String rel = getNodeText(node, "Relation Name");
+        if (!rel.isEmpty()) return rel;
+        JsonNode plans = node.get("Plans");
+        if (plans != null && plans.isArray()) {
+            for (JsonNode child : plans) {
+                String result = findRelationNameInPlan(child);
+                if (result != null) return result;
+            }
+        }
+        return null;
     }
 
     private void analyzeSorts(List<Recommendation> recommendations, AnalysisContext ctx) {
@@ -122,7 +241,7 @@ public class PlanAnalyzer {
             String modifiedQuery = addLimitToQuery(ctx.originalQuery, 100);
             addRecommendation(recommendations, RecommendationType.ADD_LIMIT,
                     String.format("Запрос возвращает %d строк. Добавьте LIMIT 100.", ctx.metrics.actualRows),
-                    ImpactLevel.MEDIUM, improvement, modifiedQuery);
+                    ImpactLevel.INFO, improvement, modifiedQuery);
         }
     }
 
@@ -186,6 +305,9 @@ public class PlanAnalyzer {
                 } else if (current instanceof Between) {
                     Between between = (Between) current;
                     if (between.getLeftExpression() != null) stack.push(between.getLeftExpression());
+                } else if (current instanceof Parenthesis) {
+                    Parenthesis paren = (Parenthesis) current;
+                    if (paren.getExpression() != null) stack.push(paren.getExpression());
                 } else if (current instanceof AndExpression || current instanceof OrExpression) {
                     if (current instanceof AndExpression) {
                         AndExpression and = (AndExpression) current;
@@ -203,7 +325,6 @@ public class PlanAnalyzer {
         }
         return cols;
     }
-
     private String extractTableFromPlan(JsonNode node, String childKey, int index) {
         JsonNode children = node.get(childKey);
         if (children != null && children.isArray() && children.size() > index) {
