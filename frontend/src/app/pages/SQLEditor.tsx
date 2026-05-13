@@ -100,13 +100,13 @@ LIMIT 100;`);
     const getImpactLabel = (impact: string) => {
         switch (impact) {
             case 'Высокий':
-                return 'HIGH';
+                return 'ВЫСОКИЙ';
             case 'Средний':
-                return 'MEDIUM';
+                return 'СРЕДНИЙ';
             case 'Низкий':
-                return 'LOW';
+                return 'НИЗКИЙ';
             default:
-                return 'INFO';
+                return 'ИНФО';
         }
     };
 
@@ -147,17 +147,17 @@ LIMIT 100;`);
                     </div>
                     <div className="w-px h-6" style={{ backgroundColor: 'var(--pg-border)' }} />
                     <button onClick={handleExecute} disabled={executing} className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all text-sm" style={{ backgroundColor: 'var(--pg-accent)', color: 'var(--pg-bg-primary)' }} onMouseEnter={e => !executing && (e.currentTarget.style.backgroundColor = 'var(--pg-accent-hover)')} onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--pg-accent)'}>
-                        <Play className="w-4 h-4" /> {executing && activeTab === 'results' ? 'Executing...' : 'Execute'}
+                        <Play className="w-4 h-4" /> {executing && activeTab === 'results' ? 'В процессе...' : 'Запустить'}
                     </button>
                     <button onClick={handleAnalyze} disabled={executing} className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors text-sm border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)', color: 'var(--pg-text-secondary)' }} onMouseEnter={e => { if (!executing) { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-text-primary)'; e.currentTarget.style.borderColor = 'var(--pg-border-light)'; } }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-secondary)'; e.currentTarget.style.borderColor = 'var(--pg-border)'; }}>
-                        <BarChart3 className="w-4 h-4" /> {executing && activeTab === 'analysis' ? 'Analyzing...' : 'Analyze'}
+                        <BarChart3 className="w-4 h-4" /> {executing && activeTab === 'analysis' ? 'Анализируем...' : 'Анализ'}
                     </button>
                     <div className="flex items-center gap-2 ml-2">
-                        <label className="text-sm" style={{ color: 'var(--pg-text-secondary)' }}>Iterations:</label>
+                        <label className="text-sm" style={{ color: 'var(--pg-text-secondary)' }}>Итераций:</label>
                         <input type="number" min="1" max="20" value={iterations} onChange={e => setIterations(Math.max(1, parseInt(e.target.value) || 1))} className="w-16 px-2 py-1 rounded border text-center" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)', color: 'var(--pg-text-primary)' }} />
                         <label className="flex items-center gap-1 ml-2 text-sm" style={{ color: 'var(--pg-text-secondary)' }}>
                             <input type="checkbox" checked={applyRecommendations} onChange={e => setApplyRecommendations(e.target.checked)} className="rounded" />
-                            Apply recommendations
+                            Применить рекомендации
                         </label>
                     </div>
                 </div>
@@ -166,7 +166,7 @@ LIMIT 100;`);
                 <Split className="flex h-full" sizes={[50, 50]} minSize={300} gutterSize={8} gutterStyle={() => ({ backgroundColor: 'var(--pg-border)', cursor: 'col-resize' })}>
                     <div className="flex flex-col h-full">
                         <div className="px-4 py-2 border-b" style={{ backgroundColor: 'var(--pg-bg-surface)', borderColor: 'var(--pg-border)' }}>
-                            <span className="text-sm font-medium" style={{ color: 'var(--pg-text-secondary)' }}>Query Editor</span>
+                            <span className="text-sm font-medium" style={{ color: 'var(--pg-text-secondary)' }}>Редактор кода</span>
                         </div>
                         <div className="flex-1" style={{ backgroundColor: 'var(--pg-bg-editor)' }}>
                             <Editor height="100%" defaultLanguage="sql" value={sql} onChange={value => setSql(value || '')} theme="vs-dark" options={{ minimap: { enabled: false }, fontSize: 14, lineNumbers: 'on', scrollBeyondLastLine: false, automaticLayout: true, tabSize: 2, fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }} />
@@ -175,10 +175,10 @@ LIMIT 100;`);
                     <div className="flex flex-col h-full">
                         <div className="flex items-center border-b" style={{ backgroundColor: 'var(--pg-bg-surface)', borderColor: 'var(--pg-border)' }}>
                             <button onClick={() => setActiveTab('results')} className="px-4 py-3 text-sm font-medium transition-colors relative" style={{ color: activeTab === 'results' ? 'var(--pg-accent)' : 'var(--pg-text-secondary)' }}>
-                                Results {activeTab === 'results' && <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ backgroundColor: 'var(--pg-accent)' }} />}
+                                Результаты выполнения {activeTab === 'results' && <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ backgroundColor: 'var(--pg-accent)' }} />}
                             </button>
                             <button onClick={() => setActiveTab('analysis')} className="px-4 py-3 text-sm font-medium transition-colors relative" style={{ color: activeTab === 'analysis' ? 'var(--pg-accent)' : 'var(--pg-text-secondary)' }}>
-                                Analysis Report {activeTab === 'analysis' && <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ backgroundColor: 'var(--pg-accent)' }} />}
+                                Анализ и рекомендации {activeTab === 'analysis' && <div className="absolute bottom-0 left-0 right-0 h-0.5" style={{ backgroundColor: 'var(--pg-accent)' }} />}
                             </button>
                         </div>
                         <div className="flex-1 overflow-auto" style={{ backgroundColor: 'var(--pg-bg-surface)' }}>
@@ -188,8 +188,8 @@ LIMIT 100;`);
                                     {queryResult?.success && (
                                         <>
                                             <div className="flex items-center gap-4 mb-4 text-xs" style={{ color: 'var(--pg-text-muted)' }}>
-                                                <div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />{queryResult.executionTimeMs} ms (avg over {iterations})</div>
-                                                <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" />{queryResult.rowCount} rows (avg)</div>
+                                                <div className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" />{queryResult.executionTimeMs} мс (в среднем за {iterations} итераций)</div>
+                                                <div className="flex items-center gap-1.5"><Activity className="w-3.5 h-3.5" />{queryResult.rowCount} строк</div>
                                             </div>
                                             {queryResult.columns.length > 0 ? (
                                                 <div className="rounded-lg border overflow-hidden" style={{ borderColor: 'var(--pg-border)' }}>
@@ -200,25 +200,25 @@ LIMIT 100;`);
                                                         </table>
                                                     </div>
                                                 </div>
-                                            ) : <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>Query executed successfully, no rows returned.</div>}
+                                            ) : <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>Запрос успешно запущен, но он не вернул строк</div>}
                                         </>
                                     )}
-                                    {!queryResult && <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>Press Execute to see results.</div>}
+                                    {!queryResult && <div className="text-center py-12" style={{ color: 'var(--pg-text-muted)' }}>Нажмите "Запустить" чтобы увидеть результат</div>}
                                 </div>
                             ) : (
                                 <div className="p-4 space-y-4">
                                     {analysisData && analysisData.success ? (
                                         <>
                                             <div className="grid grid-cols-2 gap-3">
-                                                <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}><div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Original Execution Time (avg)</div><div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>{analysisData.originalExecutionTimeMs} ms</div></div>
-                                                <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}><div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Analysis Duration (avg)</div><div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>{analysisData.analysisDurationMs} ms</div></div>
+                                                <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}><div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Оригинальное время исполнения (ср.)</div><div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>{analysisData.originalExecutionTimeMs} ms</div></div>
+                                                <div className="p-4 rounded-lg border" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}><div className="text-xs mb-1" style={{ color: 'var(--pg-text-muted)' }}>Продолжительность анализа</div><div className="text-xl font-bold" style={{ color: 'var(--pg-text-white)' }}>{analysisData.analysisDurationMs} ms</div></div>
                                             </div>
                                             <div><h3 className="text-sm font-semibold mb-3" style={{ color: 'var(--pg-text-white)' }}>Рекомендации ({analysisData.recommendations?.length || 0})</h3>
                                                 <div className="space-y-4">
                                                     {sortedRecommendations.map((rec, idx) => (
                                                         <div key={idx} className="rounded-lg border p-5 space-y-3" style={{ backgroundColor: 'var(--pg-bg-card)', borderColor: 'var(--pg-border)' }}>
-                                                            <div className="flex items-start justify-between"><div className="flex items-start gap-3"><AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: getImpactColor(rec.impact) }} /><div className="space-y-1"><div className="font-medium text-sm" style={{ color: 'var(--pg-text-white)' }}>{rec.description}</div><div className="text-xs uppercase font-medium" style={{ color: getImpactColor(rec.impact) }}>{getImpactLabel(rec.impact)} {rec.estimatedImprovement && ` • estimated +${rec.estimatedImprovement.toFixed(0)}% faster`} {rec.actualImprovement !== undefined && rec.actualImprovement !== null && ` • actual +${rec.actualImprovement.toFixed(0)}%`}</div></div></div></div>
-                                                            {rec.sqlCommand && (<div className="mt-3"><div className="flex items-center gap-2 mb-2"><Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--pg-accent)' }} /><span className="text-xs font-medium" style={{ color: 'var(--pg-text-primary)' }}>Suggested Fix</span></div><div className="relative rounded-lg p-3 font-mono text-xs" style={{ backgroundColor: 'var(--pg-bg-editor)', color: 'var(--pg-syntax-keyword)' }}><button onClick={() => copySuggestion(rec.sqlCommand!)} className="absolute top-2 right-2 p-1.5 rounded transition-colors" style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-muted)' }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-text-primary)'; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-muted)'; }}><Copy className="w-3.5 h-3.5" /></button><pre className="overflow-x-auto whitespace-pre-wrap break-words">{rec.sqlCommand}</pre></div></div>)}
+                                                            <div className="flex items-start justify-between"><div className="flex items-start gap-3"><AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: getImpactColor(rec.impact) }} /><div className="space-y-1"><div className="font-medium text-sm" style={{ color: 'var(--pg-text-white)' }}>{rec.description}</div><div className="text-xs uppercase font-medium" style={{ color: getImpactColor(rec.impact) }}>{getImpactLabel(rec.impact)} {rec.estimatedImprovement && ` • предположительно на ${rec.estimatedImprovement.toFixed(0)}% быстрее`} {rec.actualImprovement !== undefined && rec.actualImprovement !== null && ` • фактически +${rec.actualImprovement.toFixed(0)}%`}</div></div></div></div>
+                                                            {rec.sqlCommand && (<div className="mt-3"><div className="flex items-center gap-2 mb-2"><Sparkles className="w-3.5 h-3.5" style={{ color: 'var(--pg-accent)' }} /><span className="text-xs font-medium" style={{ color: 'var(--pg-text-primary)' }}>Предлагаемое исправление</span></div><div className="relative rounded-lg p-3 font-mono text-xs" style={{ backgroundColor: 'var(--pg-bg-editor)', color: 'var(--pg-syntax-keyword)' }}><button onClick={() => copySuggestion(rec.sqlCommand!)} className="absolute top-2 right-2 p-1.5 rounded transition-colors" style={{ backgroundColor: 'var(--pg-bg-card)', color: 'var(--pg-text-muted)' }} onMouseEnter={e => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-hover)'; e.currentTarget.style.color = 'var(--pg-text-primary)'; }} onMouseLeave={e => { e.currentTarget.style.backgroundColor = 'var(--pg-bg-card)'; e.currentTarget.style.color = 'var(--pg-text-muted)'; }}><Copy className="w-3.5 h-3.5" /></button><pre className="overflow-x-auto whitespace-pre-wrap break-words">{rec.sqlCommand}</pre></div></div>)}
                                                             {rec.warnings && rec.warnings.length > 0 && <div className="text-xs text-yellow-400 mt-2">⚠️ {rec.warnings.join(', ')}</div>}
                                                         </div>
                                                     ))}
