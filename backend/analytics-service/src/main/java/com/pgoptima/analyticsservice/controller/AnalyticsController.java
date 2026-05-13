@@ -1,5 +1,6 @@
 package com.pgoptima.analyticsservice.controller;
 
+import com.pgoptima.analyticsservice.dto.SlowQueryDTO;
 import com.pgoptima.analyticsservice.service.AnalyticsService;
 import com.pgoptima.analyticsservice.service.AsyncAnalysisService;
 import com.pgoptima.shareddto.request.AnalysisRequest;
@@ -15,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @Slf4j
@@ -70,5 +72,15 @@ public class AnalyticsController {
                 "successful_optimizations", 0,
                 "average_improvement", 0.0
         ));
+    }
+
+    @GetMapping("/slow-queries")
+    @Operation(summary = "Get slow queries from pg_stat_statements")
+    public ResponseEntity<List<SlowQueryDTO>> getSlowQueries(
+            @RequestParam("connectionId") Long connectionId,
+            @RequestHeader(value = "Authorization", required = false) String authHeader) {
+        log.info("Fetching slow queries for connectionId={}", connectionId);
+        List<SlowQueryDTO> slowQueries = analyticsService.getSlowQueries(connectionId, authHeader);
+        return ResponseEntity.ok(slowQueries);
     }
 }

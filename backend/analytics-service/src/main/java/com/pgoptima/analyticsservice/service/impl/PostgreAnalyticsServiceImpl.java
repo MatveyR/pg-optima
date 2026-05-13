@@ -3,6 +3,7 @@ package com.pgoptima.analyticsservice.service.impl;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.pgoptima.analyticsservice.client.UserServiceClient;
 import com.pgoptima.analyticsservice.config.PlanAnalyzerProperties;
+import com.pgoptima.analyticsservice.dto.SlowQueryDTO;
 import com.pgoptima.analyticsservice.service.AnalyticsService;
 import com.pgoptima.analyticsservice.util.PlanAnalyzer;
 import com.pgoptima.analyticsservice.util.PostgrePlanParser;
@@ -306,6 +307,66 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
         return String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
                 conn.getHost(), conn.getPort(), conn.getDatabase(),
                 conn.getSslMode() != null ? conn.getSslMode() : "disable");
+    }
+
+    @Override
+    public List<SlowQueryDTO> getSlowQueries(Long connectionId, String authHeader) {
+        log.info("Fetching slow queries for connectionId={}", connectionId);
+        ConnectionDTO connection;
+        try {
+            connection = userServiceClient.getConnectionById(connectionId, authHeader);
+            if (connection.getPassword() == null) throw new RuntimeException("Password missing");
+        } catch (Exception e) {
+            log.error("Failed to fetch connection details: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to fetch connection details: " + e.getMessage());
+        }
+
+        String url = buildUrl(connection);
+        List<SlowQueryDTO> result = new ArrayList<>();
+
+        // Check if pg_stat_statements extension is available
+        String checkExtensionSql = "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')";
+        try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
+            try (Statement stmt = conn.createStatement();
+                 ResultSet rs = stmt.executeQuery(checkExtensionSql)) {
+                if (rs.next() && !rs.getBoolean(1)) {
+                    throw new RuntimeException("pg_stat_statements extension is not enabled. Please create it: CREATE EXTENSION pg_stat_statements;");
+                }
+            }
+        } catch (SQLException e) {
+            log.error("Error checking pg_stat_statements: {}", e.getMessage());
+            throw new RuntimeException("Unable to access pg_stat_statements: " + e.getMessage());
+        }
+
+        // Query for slow queries (mean execution time > 250ms)
+        // Order by last_exec_time (most recent first), limit 100
+        String sql = "SELECT query, mean_exec_time, calls, rows, NULL as last_exec " +
+                "FROM pg_stat_statements " +
+                "WHERE mean_exec_time > 250 " +
+                "ORDER BY mean_exec_time DESC " +
+                "LIMIT 100";
+
+        try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword());
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery(sql)) {
+
+            while (rs.next()) {
+                SlowQueryDTO dto = SlowQueryDTO.builder()
+                        .query(rs.getString("query"))
+                        .meanExecutionTimeMs(rs.getDouble("mean_exec_time"))
+                        .calls(rs.getLong("calls"))
+                        .rows(rs.getLong("rows"))
+                        .lastExecuted(rs.getTimestamp("last_exec") != null ? rs.getTimestamp("last_exec").toString() : null)
+                        .build();
+                result.add(dto);
+            }
+        } catch (SQLException e) {
+            log.error("Failed to query pg_stat_statements: {}", e.getMessage());
+            throw new RuntimeException("Failed to retrieve slow queries: " + e.getMessage());
+        }
+
+        log.info("Retrieved {} slow queries", result.size());
+        return result;
     }
 
     private static class PlanExecutionResult {

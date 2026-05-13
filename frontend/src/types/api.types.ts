@@ -150,3 +150,11 @@ export interface ExecuteResponse {
     success: boolean;
     errorMessage?: string;
 }
+
+export interface SlowQueryDTO {
+    query: string;
+    meanExecutionTimeMs: number;
+    calls: number;
+    rows: number;
+    lastExecuted: string | null;
+}
