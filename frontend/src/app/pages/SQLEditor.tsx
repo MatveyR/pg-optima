@@ -222,7 +222,7 @@ LIMIT 100;`);
                                                             {rec.warnings && rec.warnings.length > 0 && <div className="text-xs text-yellow-400 mt-2">⚠️ {rec.warnings.join(', ')}</div>}
                                                         </div>
                                                     ))}
-                                                    {sortedRecommendations.length === 0 && <div className="text-center py-6" style={{ color: 'var(--pg-text-muted)' }}>No issues found. Query is optimal.</div>}
+                                                    {sortedRecommendations.length === 0 && <div className="text-center py-6" style={{ color: 'var(--pg-text-muted)' }}>Проблем не найдено. Запрос оптимален.</div>}
                                                 </div>
                                             </div>
                                         </>
