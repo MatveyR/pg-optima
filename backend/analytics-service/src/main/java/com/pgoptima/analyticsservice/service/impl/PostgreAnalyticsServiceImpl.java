@@ -16,18 +16,14 @@ import com.pgoptima.shareddto.response.ExecuteResponse;
 import com.pgoptima.shareddto.response.Recommendation;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.sf.jsqlparser.JSQLParserException;
-import net.sf.jsqlparser.expression.LongValue;
-import net.sf.jsqlparser.parser.CCJSqlParserUtil;
-import net.sf.jsqlparser.statement.select.Limit;
-import net.sf.jsqlparser.statement.select.PlainSelect;
-import net.sf.jsqlparser.statement.select.Select;
 import org.springframework.stereotype.Service;
 
 import java.sql.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
@@ -41,7 +37,8 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
 
     @Override
     public AnalysisResponse analyzeQuery(AnalysisRequest request, String authHeader) {
-        log.info("Starting analysis for connectionId={}, iterations={}, apply={}", request.getConnectionId(), request.getIterations(), request.getApplyRecommendations());
+        log.info("Starting analysis for connectionId={}, iterations={}, apply={}",
+                request.getConnectionId(), request.getIterations(), request.getApplyRecommendations());
         int iterations = request.getIterations() != null ? request.getIterations() : 1;
         boolean apply = request.getApplyRecommendations() != null && request.getApplyRecommendations();
         Instant globalStart = Instant.now();
@@ -66,6 +63,8 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
             return response;
         }
 
+        String url = buildUrl(connection);
+
         PlanExecutionResult originalExecResult;
         try {
             originalExecResult = executeExplain(request.getSqlQuery(), connection, iterations);
@@ -85,7 +84,7 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
         List<Recommendation> recommendations;
         try {
             JsonNode plan = PostgrePlanParser.parse(originalExecResult.planJson);
-            recommendations = planAnalyzer.analyze(plan, request.getSqlQuery());
+            recommendations = planAnalyzer.analyze(plan, request.getSqlQuery(), connection, authHeader);
         } catch (Exception e) {
             log.error("Plan analysis failed: {}", e.getMessage(), e);
             response.setErrorMessage("Plan analysis failed: " + e.getMessage());
@@ -94,69 +93,79 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
 
         if (apply && !recommendations.isEmpty()) {
             log.info("Applying recommendations with rollback for {} items", recommendations.size());
-            String url = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
-                    connection.getHost(), connection.getPort(), connection.getDatabase(),
-                    connection.getSslMode() != null ? connection.getSslMode() : "disable");
-            for (int i = 0; i < recommendations.size(); i++) {
-                Recommendation rec = recommendations.get(i);
+            for (Recommendation rec : recommendations) {
                 if (rec.getSqlCommand() == null || rec.getType().name().equals("OTHER")) continue;
-                if (rec.getSqlCommand().contains("таблица") || rec.getSqlCommand().contains("column")) {
-                    rec.getWarnings().add("Cannot apply: generated SQL contains placeholders");
-                    continue;
-                }
+
                 try {
-                    long originalAvg = originalExecResult.avgExecutionTimeMs;
                     if (rec.getType().name().equals("ADD_LIMIT")) {
-                        String modifiedSql = addLimitToQuery(request.getSqlQuery(), 100);
+                        String modifiedSql = rec.getSqlCommand();
                         PlanExecutionResult optimizedResult = executeExplain(modifiedSql, connection, iterations);
                         rec.setOptimizedExecutionTime(Duration.ofMillis(optimizedResult.avgExecutionTimeMs));
-                        double improvement = originalAvg > 0 ? ((originalAvg - optimizedResult.avgExecutionTimeMs) / (double) originalAvg) * 100.0 : 0;
+                        double improvement = originalExecResult.avgExecutionTimeMs > 0
+                                ? ((originalExecResult.avgExecutionTimeMs - optimizedResult.avgExecutionTimeMs) / (double) originalExecResult.avgExecutionTimeMs) * 100.0
+                                : 0;
                         rec.setActualImprovement(Math.max(0, improvement));
                         rec.setApplied(true);
                         rec.setOptimizedQuery(modifiedSql);
-                    } else if (rec.getType().name().equals("CREATE_INDEX")) {
+                    }
+                    else if (rec.getType().name().equals("CREATE_INDEX")) {
                         String indexName = extractIndexName(rec.getSqlCommand());
+                        String tableName = extractTableFromIndexCommand(rec.getSqlCommand());
                         try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
                             conn.setAutoCommit(true);
-                            String safeCommand = sanitizeIndexCommand(rec.getSqlCommand());
-                            try (java.sql.Statement stmt = conn.createStatement()) {
-                                stmt.execute(safeCommand);
-                            }
-                        }
-                        PlanExecutionResult optimizedResult = executeExplain(request.getSqlQuery(), connection, iterations);
-                        double improvement = originalAvg > 0 ? ((originalAvg - optimizedResult.avgExecutionTimeMs) / (double) originalAvg) * 100.0 : 0;
-                        rec.setActualImprovement(Math.max(0, improvement));
-                        rec.setApplied(true);
-                        try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
-                            conn.setAutoCommit(true);
-                            try (java.sql.Statement stmt = conn.createStatement()) {
+                            try (Statement stmt = conn.createStatement()) {
                                 stmt.execute("DROP INDEX IF EXISTS " + indexName);
                             }
+                            String safeCommand = rec.getSqlCommand().replaceAll("(?i)CONCURRENTLY\\s*", "").trim();
+                            try (Statement stmt = conn.createStatement()) {
+                                stmt.execute(safeCommand);
+                                log.info("Created index {}", indexName);
+                            }
+                            if (tableName != null) {
+                                try (Statement stmt = conn.createStatement()) {
+                                    stmt.execute("ANALYZE " + tableName);
+                                }
+                            }
+                            PlanExecutionResult optimizedResult = executeExplain(request.getSqlQuery(), connection, iterations);
+                            double improvement = originalExecResult.avgExecutionTimeMs > 0
+                                    ? ((originalExecResult.avgExecutionTimeMs - optimizedResult.avgExecutionTimeMs) / (double) originalExecResult.avgExecutionTimeMs) * 100.0
+                                    : 0;
+                            rec.setActualImprovement(Math.max(0, improvement));
+                            rec.setApplied(true);
+                            try (Statement stmt = conn.createStatement()) {
+                                stmt.execute("DROP INDEX IF EXISTS " + indexName);
+                                log.info("Dropped index {}", indexName);
+                            }
                         }
-                    } else if (rec.getType().name().equals("INCREASE_WORK_MEM")) {
+                    }
+                    else if (rec.getType().name().equals("INCREASE_WORK_MEM")) {
                         try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
-                            conn.setAutoCommit(true);
-                            try (java.sql.Statement stmt = conn.createStatement()) {
+                            try (Statement stmt = conn.createStatement()) {
                                 stmt.execute(rec.getSqlCommand());
                             }
                         }
                         PlanExecutionResult optimizedResult = executeExplain(request.getSqlQuery(), connection, iterations);
-                        double improvement = originalAvg > 0 ? ((originalAvg - optimizedResult.avgExecutionTimeMs) / (double) originalAvg) * 100.0 : 0;
+                        double improvement = originalExecResult.avgExecutionTimeMs > 0
+                                ? ((originalExecResult.avgExecutionTimeMs - optimizedResult.avgExecutionTimeMs) / (double) originalExecResult.avgExecutionTimeMs) * 100.0
+                                : 0;
                         rec.setActualImprovement(Math.max(0, improvement));
                         rec.setApplied(true);
-                    } else if (rec.getType().name().equals("UPDATE_STATISTICS")) {
+                    }
+                    else if (rec.getType().name().equals("UPDATE_STATISTICS")) {
                         try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
-                            conn.setAutoCommit(true);
-                            try (java.sql.Statement stmt = conn.createStatement()) {
+                            try (Statement stmt = conn.createStatement()) {
                                 stmt.execute(rec.getSqlCommand());
                             }
                         }
                         PlanExecutionResult optimizedResult = executeExplain(request.getSqlQuery(), connection, iterations);
-                        double improvement = originalAvg > 0 ? ((originalAvg - optimizedResult.avgExecutionTimeMs) / (double) originalAvg) * 100.0 : 0;
+                        double improvement = originalExecResult.avgExecutionTimeMs > 0
+                                ? ((originalExecResult.avgExecutionTimeMs - optimizedResult.avgExecutionTimeMs) / (double) originalExecResult.avgExecutionTimeMs) * 100.0
+                                : 0;
                         rec.setActualImprovement(Math.max(0, improvement));
                         rec.setApplied(true);
-                    } else {
-                        rec.getWarnings().add("Auto-apply not supported for this recommendation type");
+                    }
+                    else {
+                        rec.getWarnings().add("Авто-применение недоступно для данного типа рекомендации");
                     }
                 } catch (Exception e) {
                     log.warn("Failed to apply recommendation {}: {}", rec.getType(), e.getMessage());
@@ -173,11 +182,52 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
         return response;
     }
 
+    private PlanExecutionResult executeExplain(String sql, ConnectionDTO conn, int iterations) throws SQLException {
+        String url = buildUrl(conn);
+        long totalTime = 0;
+        String planJson = null;
+        boolean success = false;
+        for (int i = 0; i < iterations; i++) {
+            try (Connection connection = DriverManager.getConnection(url, conn.getUsername(), conn.getPassword())) {
+                connection.setAutoCommit(true);
+                String explainSql = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) " + sql;
+                try (Statement stmt = connection.createStatement();
+                     ResultSet rs = stmt.executeQuery(explainSql)) {
+                    if (rs.next()) {
+                        planJson = rs.getString(1);
+                        if (planJson != null && !planJson.isEmpty()) {
+                            JsonNode root = PostgrePlanParser.parse(planJson);
+                            double actualTimeMs = root.path("Actual Total Time").asDouble(0);
+                            if (actualTimeMs > 0) {
+                                totalTime += actualTimeMs;
+                                success = true;
+                            } else {
+                                log.warn("Iteration {} returned zero execution time, possibly due to statement being a utility command", i);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.error("Iteration {} failed: {}", i, e.getMessage());
+            }
+        }
+        if (!success || totalTime <= 0) {
+            throw new SQLException("EXPLAIN ANALYZE failed or returned zero execution time for all iterations");
+        }
+        return new PlanExecutionResult(planJson, totalTime / iterations);
+    }
+
     private String extractIndexName(String sqlCommand) {
         String pattern = "CREATE\\s+(?:CONCURRENTLY\\s+)?INDEX\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(\\w+)";
-        java.util.regex.Matcher m = java.util.regex.Pattern.compile(pattern, java.util.regex.Pattern.CASE_INSENSITIVE).matcher(sqlCommand);
+        Matcher m = Pattern.compile(pattern, Pattern.CASE_INSENSITIVE).matcher(sqlCommand);
         if (m.find()) return m.group(1);
         return "idx_" + System.currentTimeMillis();
+    }
+
+    private String extractTableFromIndexCommand(String sql) {
+        Pattern p = Pattern.compile("ON\\s+(\\w+(?:\\.\\w+)?)\\s*\\(", Pattern.CASE_INSENSITIVE);
+        Matcher m = p.matcher(sql);
+        return m.find() ? m.group(1) : null;
     }
 
     @Override
@@ -192,9 +242,7 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
             log.error("Failed to fetch connection details: {}", e.getMessage(), e);
             return ExecuteResponse.builder().success(false).errorMessage("Failed to fetch connection details: " + e.getMessage()).build();
         }
-        String url = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
-                connection.getHost(), connection.getPort(), connection.getDatabase(),
-                connection.getSslMode() != null ? connection.getSslMode() : "disable");
+        String url = buildUrl(connection);
         List<String> lastColumns = null;
         List<List<Object>> lastRows = null;
         long totalDuration = 0;
@@ -202,7 +250,7 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
         boolean anySuccess = false;
         for (int iter = 0; iter < iterations; iter++) {
             try (Connection conn = DriverManager.getConnection(url, connection.getUsername(), connection.getPassword())) {
-                try (java.sql.Statement stmt = conn.createStatement()) {
+                try (Statement stmt = conn.createStatement()) {
                     stmt.setFetchSize(1000);
                     Instant start = Instant.now();
                     boolean isSelect = stmt.execute(request.getQuery());
@@ -254,65 +302,10 @@ public class PostgreAnalyticsServiceImpl implements AnalyticsService {
                 .build();
     }
 
-    private PlanExecutionResult executeExplain(String sql, ConnectionDTO conn, int iterations) throws SQLException {
-        String url = String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
+    private String buildUrl(ConnectionDTO conn) {
+        return String.format("jdbc:postgresql://%s:%d/%s?sslmode=%s",
                 conn.getHost(), conn.getPort(), conn.getDatabase(),
                 conn.getSslMode() != null ? conn.getSslMode() : "disable");
-        long totalTime = 0;
-        String planJson = null;
-        boolean success = false;
-        for (int i = 0; i < iterations; i++) {
-            try (Connection connection = DriverManager.getConnection(url, conn.getUsername(), conn.getPassword())) {
-                String explainSql = "EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) " + sql;
-                try (java.sql.Statement stmt = connection.createStatement();
-                     ResultSet rs = stmt.executeQuery(explainSql)) {
-                    if (rs.next()) {
-                        planJson = rs.getString(1);
-                        if (planJson != null) {
-                            JsonNode root = PostgrePlanParser.parse(planJson);
-                            double actualTimeMs = root.path("Actual Total Time").asDouble(0);
-                            totalTime += actualTimeMs;
-                            success = true;
-                        }
-                    }
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-        if (!success) throw new SQLException("Explain failed for all iterations");
-        return new PlanExecutionResult(planJson, totalTime / iterations);
-    }
-
-    private String addLimitToQuery(String originalSql, int limit) {
-        try {
-            net.sf.jsqlparser.statement.Statement stmt = CCJSqlParserUtil.parse(originalSql);
-            if (stmt instanceof Select) {
-                Select select = (Select) stmt;
-                if (select.getSelectBody() instanceof PlainSelect) {
-                    PlainSelect plain = (PlainSelect) select.getSelectBody();
-                    if (plain.getLimit() == null) {
-                        Limit limitClause = new Limit();
-                        limitClause.setRowCount(new LongValue(limit));
-                        plain.setLimit(limitClause);
-                        String modified = select.toString();
-                        if (originalSql.trim().endsWith(";")) {
-                            modified = modified + ";";
-                        }
-                        return modified;
-                    }
-                }
-            }
-            return originalSql + " LIMIT " + limit;
-        } catch (JSQLParserException e) {
-            return originalSql + " LIMIT " + limit;
-        }
-    }
-
-    private String sanitizeIndexCommand(String sqlCmd) {
-        sqlCmd = sqlCmd.replaceAll("(?i)CONCURRENTLY\\s*", "");
-        sqlCmd = sqlCmd.replaceAll("\\s+", " ").trim();
-        return sqlCmd;
     }
 
     private static class PlanExecutionResult {

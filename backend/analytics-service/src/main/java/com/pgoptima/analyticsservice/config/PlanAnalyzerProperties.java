@@ -18,4 +18,10 @@ public class PlanAnalyzerProperties {
     private long highExecutionTimeMs = 5000;
     private int maxJoinCount = 5;
     private boolean allowModifyingQueries = false;
+    private double indexSelectivityThreshold = 0.5;
+
+    // новые параметры
+    private long partitionSizeThreshold = 10_000_000;   // порог для партиционирования
+    private int outdatedStatsDays = 7;                  // дни до устаревания статистики
+    private double hashJoinCostThreshold = 1000.0;      // порог стоимости для Hash Join
 }

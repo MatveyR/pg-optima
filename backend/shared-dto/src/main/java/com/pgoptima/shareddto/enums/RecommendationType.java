@@ -4,7 +4,6 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 import io.swagger.v3.oas.annotations.media.Schema;
 
-
 @Schema(description = "Типы рекомендаций по оптимизации SQL-запросов")
 public enum RecommendationType {
 
@@ -44,6 +43,28 @@ public enum RecommendationType {
     @Schema(description = "Кэширование результатов")
     CACHE_RESULTS("Кэширование результатов"),
 
+    // НОВЫЕ ТИПЫ РЕКОМЕНДАЦИЙ
+    @Schema(description = "Замена коррелированных подзапросов на SEMI JOIN")
+    REWRITE_JOIN_TO_SEMI_JOIN("Замена коррелированных подзапросов на SEMI JOIN"),
+
+    @Schema(description = "Исправление неявного приведения типов")
+    FIX_DATA_TYPE_MISMATCH("Исправление неявного приведения типов"),
+
+    @Schema(description = "Включение параллельных запросов")
+    ENABLE_PARALLEL_QUERY("Включение параллельных запросов"),
+
+    @Schema(description = "Партиционирование больших таблиц")
+    SUGGEST_PARTITIONING("Партиционирование больших таблиц"),
+
+    @Schema(description = "JIT-компиляция для сложных запросов")
+    ENABLE_JIT_COMPILATION("JIT-компиляция для сложных запросов"),
+
+    @Schema(description = "Оптимизация GROUP BY (индекс/материализованное представление)")
+    OPTIMIZE_GROUP_BY("Оптимизация GROUP BY"),
+
+    @Schema(description = "Избегать функций в условии WHERE")
+    AVOID_FUNCTION_IN_WHERE("Избегать функций в WHERE"),
+
     @Schema(description = "Другое")
     OTHER("Другое");
 
@@ -76,6 +97,20 @@ public enum RecommendationType {
     }
 
     public static RecommendationType[] getQueryRestructureTypes() {
-        return new RecommendationType[]{REWRITE_QUERY, CHANGE_JOIN_TYPE, SPLIT_QUERY};
+        return new RecommendationType[]{REWRITE_QUERY, CHANGE_JOIN_TYPE, SPLIT_QUERY, REWRITE_JOIN_TO_SEMI_JOIN};
+    }
+
+    /**
+     * Типы рекомендаций, связанные с настройкой параметров СУБД
+     */
+    public static RecommendationType[] getParameterTuningTypes() {
+        return new RecommendationType[]{INCREASE_WORK_MEM, ENABLE_PARALLEL_QUERY, ENABLE_JIT_COMPILATION, TUNE_DB_PARAMS};
+    }
+
+    /**
+     * Типы рекомендаций по изменению схемы БД
+     */
+    public static RecommendationType[] getSchemaChangeTypes() {
+        return new RecommendationType[]{CREATE_INDEX, SUGGEST_PARTITIONING, FIX_DATA_TYPE_MISMATCH};
     }
 }

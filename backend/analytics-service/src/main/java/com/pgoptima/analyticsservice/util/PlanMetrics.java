@@ -57,4 +57,12 @@ public class PlanMetrics {
     String largestSeqScanTable = "";
     Set<String> usedIndexes = new HashSet<>();
     Set<String> sortKeyColumns = new HashSet<>();
+
+    // новые метрики
+    long correlatedSubqueryCount = 0;
+    long dataTypeMismatchCount = 0;
+    long functionInWhereCount = 0;
+    long missingStatisticsTables = 0;
+    boolean jitAvailable = false;
+    boolean jitUsed = false;
 }
